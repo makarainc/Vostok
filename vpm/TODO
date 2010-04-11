@@ -1,0 +1,56 @@
+===========================================================================
+Copyright 2010 Makara, Inc.
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may
+not use this file except in compliance with the License. You may obtain a
+copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+License for the specific language governing permissions and limitations
+under the License.
+===========================================================================
+
+$URL: svn+ssh://svn.oss-1701.com/vostok/trunk/util/cartridge-support/Cartridge/Config.py $
+$Date: 2010-03-24 09:51:03 -0700 (Wed, 24 Mar 2010) $
+$Revision: 6283 $
+
+
+
+TODO
+
+Documentation
+
+  - All declarations (control, build, location files) must be encoded in
+    UTF-8
+  - document provides, depends, and conflicts value formats (see
+    _canonicalize_provides() and _canonicalize_relation() below)
+
+FIXME: MISSING: signing or packages and signature verification
+FIXME: MISSING: custom environments (formerly "environment descriptors")
+FIXME: MISSING: advanced (circular, etc.) application of cartridge settings 
+  e.g:
+    - app A depends on cartridge B or C
+    - A, B are installed
+    - A's settings for B are applied to B
+    - C is installed (does not conflict with B)
+      -> A's settings for C should be applied
+    - B is removed
+      -> A should be "switched" from B to C right before removal
+FIXME: MISSING: deployment mode support (rolling, "warm", "cold", etc.)
+FIXME: MISSING: privilege separation between cartridges/packages, chroot'ing
+FIXME: MISSING: hook security, runtime env. (incl. privilege separation)
+  ? run hooks chroot'ed
+FIXME: MISSING zip pathnames security validation
+
+
+FIXME: check proper use of KEY_INSN, KEY_NAME, and KEY_NQUO
+
+FIXME: support rollback in _remove
+FIXME: stop on remove needs to recurse in dependent packages
+
+
+EOF

@@ -1,0 +1,263 @@
+#!/usr/bin/env python
+# ===========================================================================
+# Copyright 2010 Makara, Inc.
+# 
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain a
+# copy of the License at
+# 
+#     http://www.apache.org/licenses/LICENSE-2.0
+# 
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+# ===========================================================================
+#
+# $URL: svn+ssh://svn.oss-1701.com/vostok/trunk/vpm/bin/vostok $
+# $Date: 2010-03-31 02:42:32 +0200 (Mi, 31 Mrz 2010) $
+# $Revision: 6415 $
+
+from optparse import OptionParser
+
+import logging
+import os
+import pdb
+import re
+import sys
+
+from subprocess import call, Popen, PIPE
+
+import VPM
+from VPM.Constants import *
+
+
+MAX_ANY='*'
+
+Args    = None
+Options = None
+
+#
+# Result Codes for get-allocation-size
+ALLOC_SIZE_NOT_APPLICABLE = -1
+ALLOC_SIZE_UNKNOWN        = -2
+
+
+def ensure_args(n, m = None):
+    '''
+    Make sure min n and max m command line parameters are present
+    If n == m only n has to be set
+    If m is MAX_ANY, any number of argumenst >= n will do
+
+    @param n: minimum number of command line parameters
+    @param m: maximum number of command line parameters
+    '''
+    l = len(Args) - 1
+
+    m = m or n
+    if l >= n and (m == MAX_ANY or l <= m):
+        if m == MAX_ANY:
+            return tuple(Args[1:])
+        else:
+            return tuple(Args[1:] + map(lambda x: None, range(m - l)))
+    else:
+        adj = None
+        exp = None
+
+        if l < n:
+            adj = 'insufficient'
+        else:
+            adj = 'excess'
+        if n != m:
+            if m == MAX_ANY:
+                exp = '%d or more' % n
+            else:
+                exp = '%d-%d' % (n, m)
+        else:
+            exp = '%d' % n
+
+        sys.stderr.write("\n%s arguments to '%s': "
+                         "expected %s, got %d\n\n" % (adj, Args[0], exp, l))
+        parser.print_usage()
+
+        sys.exit(2)
+
+usage = "\n" \
+        "  %%prog [-hr] command [arg ...]\n" \
+        "\n" \
+        "  Commands are:\n" \
+        "\n" \
+        "    run-hook package-name hook-name [arg ...]\n" \
+        "\n" \
+        "    get-hook package-name hook-name (internal use only)\n" \
+        "\n" \
+        "    get-allocation-size package-name [process-name]\n" \
+        "      Return the amount of memory (in KB) set aside for a package\n" \
+        "      or one of the following codes:\n" \
+        "        ALLOC_SIZE_NOT_APPLICABLE (%d)\n" \
+        "        ALLOC_SIZE_UNKNOWN (%d)\n" \
+        % (ALLOC_SIZE_NOT_APPLICABLE, ALLOC_SIZE_UNKNOWN)
+
+parser = OptionParser(usage = usage, version = '%prog 1.0')
+
+parser.add_option('-r', '--root', type = 'string',
+                  action = 'store', dest = 'root', default = '/',
+                  help = "root vpm in a different directory (default: '/')")
+parser.add_option('-d', '--debug',
+                  action = "store_true", dest = "debug", default = False,
+                  help = "don't trap exceptions (default: False)")
+parser.add_option('-t', '--trace',
+                  action = "store_true", dest = 'trace', default = False,
+                  help = "trace execution (debugging only, default: False)")
+parser.add_option('-T', '--trace-hooks',
+                  action = "store_true", dest = 'trace_hooks', default = False,
+                  help = "trace hooks (debugging only, default: False)")
+
+(Options, Args) = parser.parse_args()
+
+# instantiate our environment upfront so we can customize it.
+Env = VPM.Environment(Options.root)
+
+if Options.debug:
+    Env.debug = True
+    Env.log.setLevel(logging.DEBUG)
+else:
+    Env.log.setLevel(logging.INFO)
+if Options.trace:
+    Env.trace(True)
+    pdb.set_trace()
+if Options.trace_hooks:
+    Env.trace_hooks = True
+
+rc = 0
+
+if Args:
+    pkg = VPM.Package(Env)
+    cmd = Args[0]
+
+
+    if cmd == 'run-hook':
+        ensure_args(2, MAX_ANY)
+
+        name = Args[1]
+        hook = Args[2]
+        args = Args[3:]
+
+        (r, v, e) = pkg.get_hook(name, hook)
+        if e:
+            sys.stderr.write(e)
+        if r and v:
+            cmd = [v] + args
+                
+            (r, v, e) = pkg.get_bundle_dir(name)
+            if e:
+                sys.stderr.write(e)
+            if r and v:
+                os.putenv('VS_HOME', v)
+                rc = call(cmd)
+            else:
+                rc = 1
+        else:
+            rc = 1
+    elif cmd == 'get-hook':
+        name, hook = ensure_args(2)
+
+        (r, v, e) = pkg.get_hook(name, hook)
+        if e:
+            sys.stderr.write(e)
+        if r:
+            if v:
+                sys.stdout.write(v + "\n")
+                rc = 0
+            else:
+                sys.stdout.write("/bin/false\n")
+                rc = 1
+        else:
+            rc = 1
+    elif cmd == 'get-allocation-size':
+        pkg_name, proc_name = ensure_args(1, 2);
+        mem = None
+        rc = 1
+
+        # get system memory
+        try:
+            c = ['/usr/bin/free']
+            p = Popen(c, stdout = PIPE, stderr = PIPE)
+            (o, e) = p.communicate()
+            r = p.returncode
+            if r != 0:
+                sys.stderr.write("'%s': %s" % (' '.join(c), e))
+                rc = r
+            else: 
+                c = ['/bin/sed', '-n', 's/^Mem: *\\([0-9]*\\).*$/\\1/p']
+                p = Popen(c, stdin = PIPE, stdout = PIPE, stderr = PIPE)
+                (o, e) = p.communicate(o)
+                r = p.returncode
+                if r != 0:
+                    sys.stderr.write("'%s': %s" % (' '.join(c), e))
+                    rc = r
+                else:
+                    mem = int(o)
+                    rc = 0
+        except Exception, e:
+            sys.stderr.write("Error running '%s':\n%s\n" %
+                             (' '.join(sys.argv), e));
+            rc = 1
+        
+        # get pkg_name role (we ignore proc_name for now)
+        res, val, err = pkg.info(pkg_name)
+
+        # get allocation size
+        #
+        # Current recipe (Vega, see case 2472) is:
+        #
+        #   S:      250 MB      ; 50 threads @ 5 MB/thread
+        #   D/R:      x MB      ; 20 threads @ 32 MB min = 640 MB min
+        #   DB:     200 MB
+        #   System: 100 MB
+        #   
+        #   x = max(total - 100 - 200 - 250, 640)
+        #
+        if res and val:
+            role = val[KEY_ROLE]
+
+            if   role == VAL_ROLE_STA:
+                alloc = 256000
+            elif role == VAL_ROLE_DYN:
+                m = re.search('apache', pkg_name)
+
+                if m:
+                    alloc = max(mem - 563200, 655360)
+                else:
+                    alloc = ALLOC_SIZE_NOT_APPLICABLE
+            elif role == VAL_ROLE_RTM:
+                m = re.search('jdk', pkg_name)
+                
+                if m:
+                    alloc = max(mem - 563200, 655360)
+                else:
+                    alloc = ALLOC_SIZE_NOT_APPLICABLE
+            elif role == VAL_ROLE_DBM:
+                alloc = 204800
+            else:
+                alloc = ALLOC_SIZE_UNKNOWN
+            
+            sys.stdout.write("%s\n" % alloc)
+            rc = 0
+        else:
+            sys.stderr.write(("Error: couldn't get information for "
+                              "package '%s': '%s'\n") % (pkg_name, err))
+            rc = 1
+    else:
+        sys.stderr.write("\nUnknown command: %s\n\n" % cmd)
+        parser.print_usage()
+        rc = 2
+else:
+    parser.print_usage()
+    rc = 2
+
+sys.exit(rc)
+
+#
+# EOF

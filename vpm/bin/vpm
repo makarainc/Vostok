@@ -1,0 +1,312 @@
+#!/usr/bin/env python
+# ===========================================================================
+# Copyright 2010 Makara, Inc.
+# 
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain a
+# copy of the License at
+# 
+#     http://www.apache.org/licenses/LICENSE-2.0
+# 
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+# ===========================================================================
+#
+# $URL: svn+ssh://svn.oss-1701.com/vostok/trunk/vpm/bin/vpm $
+# $Date: 2010-03-31 02:42:32 +0200 (Mi, 31 Mrz 2010) $
+# $Revision: 6415 $
+
+from optparse import OptionParser
+
+import logging
+import pdb
+import pprint
+import sys
+
+import VPM
+
+def ensure_args(n, m = None):
+    '''
+    Make sure min n and max m command line parameters are present
+    If n == m only n hast to be set
+    @param n: minimum number of command line parameters
+    @param m: maximum number of command line parameters
+    '''
+    l = len(args) - 1
+    
+    m = m or n
+    if l >= n and l <= m:
+        return tuple(args[1:] + map(lambda x: None, range(m - l)))
+    else:
+        adj = None
+        exp = None
+
+        if l < n:
+            adj = 'insufficient'
+        else:
+            adj = 'excess'
+        if n != m:
+            exp = '%d-%d' % (n, m)
+        else:
+            exp = '%d' % n
+            
+        sys.stderr.write("\n%s arguments to '%s': "
+                         "expected %s, got %d\n\n" % (adj, args[0], exp, l))
+        parser.print_usage()
+        
+        sys.exit(2)
+        
+usage = "\n" \
+        "  %prog [-dhnt] [-r root] command [arg ...]\n" \
+        "\n" \
+        "  Commands are:\n" \
+        "    pack build-root dest-dir\n" \
+        "    unpack package-file dest-dir\n" \
+        "    package-name control-file [build-file]\n" \
+        "\n" \
+        "    install {package-file | package-dir} [dest-root [deploy-mode]]\n"\
+        "    remove package-name [deploy_mode]\n" \
+        "    purge package-name [deploy_mode]\n" \
+        "\n" \
+        "    installable {package-file | package-dir}\n" \
+        "    removable package-name\n" \
+        "\n" \
+        "    status package-name\n" \
+        "    info package-name\n" \
+        "\n" \
+        "    start package-name\n" \
+        "    stop package-name\n" \
+        "    restart package-name\n" \
+        "\n" \
+        "    list\n" \
+        "    list-avail"
+
+parser = OptionParser(usage = usage, version = '%prog 1.0')
+
+parser.add_option('-r', '--root', type = 'string',
+                  action = 'store', dest = 'root', default = '/',
+                  help = "root vpm in a different directory (default: '/')")
+parser.add_option('-d', '--debug',
+                  action = "store_true", dest = "debug", default = False,
+                  help = "don't trap exceptions (default: False)")
+parser.add_option('-t', '--trace',
+                  action = "store_true", dest = 'trace', default = False,
+                  help = "trace execution (debugging only, default: False)")
+parser.add_option('-T', '--trace-hooks',
+                  action = "store_true", dest = 'trace_hooks', default = False,
+                  help = "trace hooks (debugging only, default: False)")
+parser.add_option('-n', '--no-hooks',
+                  action = "store_true", dest = 'no_hooks', default = False,
+                  help = "don't run package hooks (default: False)")
+parser.add_option('--pdb',
+                  action = "store_true", dest = "pdb", default = False,
+                  help = "enable pdb (default: False)")
+        
+(options, args) = parser.parse_args()
+
+# instantiate our environment upfront so we can customize it.
+env = VPM.Environment(options.root)
+
+if options.debug:
+    env.debug = True
+    env.log.setLevel(logging.DEBUG)
+else:
+    env.log.setLevel(logging.INFO)
+if options.trace:
+    env.trace(True)
+if options.trace_hooks:
+    env.trace_hooks = True
+if options.no_hooks:
+    env.no_hooks = True
+
+res = None
+val = None
+err = None
+
+REMOVE_ERR_ORDER = ['Name', 'Version', 'Build', 'Depends']
+REMOVE_ERR_FIELDS = frozenset(REMOVE_ERR_ORDER)
+INSTALL_ERR_ORDER = ['Name', 'Version', 'Build', 'Depends', 'Conflicts'] 
+INSTALL_ERR_FIELDS = frozenset(INSTALL_ERR_ORDER)
+
+def print_dict(err, fields):
+    for key in fields:
+        sys.stderr.write("  %-16s%s\n" % (key + ':', str(err[key])))
+                
+
+if args:    
+    if options.pdb:
+        pdb.set_trace()
+
+    cmd = args[0]
+
+    if cmd == 'pack':
+        pkg = VPM.Package(env)
+        build_root, pkg_dst = ensure_args(2)
+        res, val, err = pkg.pack(build_root, pkg_dst)
+    elif cmd == 'unpack':
+        pkg = VPM.Package(env)
+        p, d = ensure_args(2)
+        res, val, err = pkg.unpack(p, d)
+    elif cmd == 'package-name':
+        pkg = VPM.Package(env)
+        c, b = ensure_args(1, 2)
+        b = b or None
+        res, val, err = pkg.package_name(c, b)    
+    elif cmd == 'install':
+        pkg = VPM.Package(env)
+        package, directory, mode = ensure_args(1, 3)
+        directory = directory or None
+        mode = mode or None
+        res, val, err = pkg.install(package, directory, mode)
+    elif cmd == 'remove':
+        pkg = VPM.Package(env)
+        pkg_name, mode = ensure_args(1, 2)
+        mode = mode or None
+        res, val, err = pkg.remove(pkg_name, mode)
+    elif cmd == 'purge':
+        pkg = VPM.Package(env)
+        pkg_name, mode = ensure_args(1, 2)
+        mode = mode or None
+        res, val, err = pkg.purge(pkg_name, mode)
+    elif cmd == 'installable':
+        pkg = VPM.Package(env)
+        pkg_name, = ensure_args(1)
+        res, val, err = pkg.installable(pkg_name)
+    elif cmd == 'removable':
+        pkg = VPM.Package(env)
+        pkg_name, = ensure_args(1)
+        res, val, err = pkg.removable(pkg_name)
+    elif cmd == 'info':
+        pkg = VPM.Package(env)
+        pkg_name, = ensure_args(1)
+        res, val, err = pkg.info(pkg_name)
+    elif cmd == 'status':
+        db = VPM.DB(env)
+        pkg_name = ensure_args(1)
+        val = db.status(pkg_name[0])
+        res = True
+    elif cmd == 'start':
+        pkg = VPM.Package(env)
+        package, = ensure_args(1)
+        res, val, err = pkg.start(package)
+    elif cmd == 'stop':
+        pkg = VPM.Package(env)
+        package, = ensure_args(1)
+        res, val, err = pkg.stop(package)
+    elif cmd == 'restart':
+        pkg = VPM.Package(env)
+        package, = ensure_args(1)
+        res, val, err = pkg.restart(package)
+    elif cmd == 'list':
+        db = VPM.DB(env)
+        stati = {db.UNKNOWN   : 'u',
+                 db.IMPORTED  : 'm',
+                 db.INSTALLED : 'i',
+                 db.COMMITTED : 'c',
+                 db.REMOVED   : 'r',
+                 db.PURGED    : 'p',
+                 db.BROKEN    : 'b'}
+        lis = None
+        
+        ensure_args(0)
+        lis = db.list_packages()
+        strs = ["Status=Unknown/iMported/Installed/Removed/Purged/Broken",
+                "| Name                             Version          Build",
+                "=-================================-================-====="]
+        for pkg in lis:
+            status = pkg[VPM.KEY_STAT]
+            strs.append("%s %-32s %-16s %5s" % \
+                        (stati[pkg[VPM.KEY_STAT]],
+                         pkg[VPM.KEY_NAME],
+                         pkg[VPM.KEY_VERS],
+                         pkg[VPM.KEY_BUIL]))
+        val = "\n".join(strs)
+    elif cmd == 'list-avail':
+        pkg = VPM.Package(env)
+        lis = None
+        
+        str_roles, str_repositories = ensure_args(0, 2)
+        
+        if str_roles is not None:
+            roles = str_roles.split(",")
+        else:
+            roles = []
+            
+        if str_repositories is not None:    
+            repositories = str_repositories.split(",")
+        else:
+            repositories = []
+        
+        list = pkg.list_available(roles, repositories)
+        strs = ["Role        Name                           Version     Build",
+                "===========-==============================-===========-====="]
+        for k, v in list.iteritems():
+            for p in v:
+                strs.append("%s %-30s %-11s %5s" % \
+                        (p[VPM.KEY_ROLE],
+                         p[VPM.KEY_NAME],
+                         p[VPM.KEY_VERS],
+                         p[VPM.KEY_BUIL]))
+        val = "\n".join(strs)    
+    elif cmd == 'chirp':
+        # art stolen from http://www.ascii-art.de/ascii/ab/bird.txt
+        sys.stderr.write(''.join([isinstance(x, list) and (x[0] * chr(x[1]))
+                                  or chr(x) for x in [10, [9, 32], 86, 10,
+                                  [7, 32], 40, 111, 32, 111, 41, 10, [6,
+                                  32], 40, [2, 32], 86, [2, 32], 41, 10, 32,
+                                  [7, 46], 109, 46, 109, [7, 46], 10, [8,
+                                  32], 39, 124, 39, 10, [3, 46], 32, 34, 72,
+                                  97, 118, 101, 32, 121, 111, 117, 32, 99,
+                                  104, 105, 114, 112, 101, 100, 32, 116,
+                                  111, 100, 97, 121, 63, 32, [3, 46], [2,
+                                  10]]]))
+        sys.exit(0)             
+    else:
+        sys.stderr.write("\nunknown command: %s\n\n" % args[0])
+        parser.print_usage()
+
+        sys.exit(2)
+        
+    if err:
+        t = res and 'Warning:' or 'Error:'
+
+        if isinstance(err, list):
+            for e in err:
+                if isinstance(e, dict):
+                    s = frozenset(e.keys())
+                    
+                    sys.stderr.write("%s\n" % t)
+
+                    if s == REMOVE_ERR_FIELDS:
+                        print_dict(e, REMOVE_ERR_ORDER)
+                    elif s == INSTALL_ERR_FIELDS:
+                        print_dict(e, INSTALL_ERR_ORDER)
+                    else:
+                        print_dict(e, sorted(e.keys()))
+                else:
+                    sys.stderr.write("%s %s\n" % (t, e))
+        else:
+            sys.stderr.write("%s %s\n" % (t, err))
+    
+    if not isinstance(val, basestring):
+        if pprint.isrecursive(val):
+            val = pprint.saferepr(val)
+        else:
+            val = pprint.pformat(val)
+
+    sys.stdout.write(val + "\n")
+    #sys.stdout.write(str(val) + "\n")
+
+    if res:
+        sys.exit(0)
+    else:
+        sys.exit(1)
+else:
+    parser.print_usage()
+    sys.exit(0)
+
+#
+# EOF
