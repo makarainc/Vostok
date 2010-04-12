@@ -1,3 +1,83 @@
 The Vostok Cloud Application Platform
 
 www.makara.com
+
+
+1. Introduction
+
+The Vostok Cloud Application platform let's you host web applications on a 
+cluster of cloud instances.
+
+The open source edition currently supports only basic package operations. In the
+following weeks the additional parts will be open sourced. With the package 
+manager you can prepare and package your web applications today.
+
+The Vostok Package Manager (called VPM) manages the packages on each node. A 
+package can either be binary cartridges like Apache, Tomcat, Java, PHP, Python 
+or Ruby or web applications.
+
+2. Packaging a web application.
+Before you can deploy your web application on the Vostok Cloud Application 
+Platform, it needs to be packaged in a VPM package file.
+
+a. Preparations
+Prepare the file layout
+Create a build directory that will hold all the files required for the package.
+This directory can have any name.
+$ mkdir mywebapp
+
+b. Package directory layout
+Create two directories below this directory, the first one named 'bundle', the
+other named 'info'
+
+$ cd mywebapp
+$ mkdir bundle
+$ mkdir info
+
+c. Package Metadata
+Copy the files from the vpm/doc/templates directory in the source tarball to 
+your info directory. These files serve as a starting point and must be 
+customized afterwards. VPM reads these files when packaging and installing your 
+application.
+
+$ cp -R <vostok source>/vpm/doc/templates info/
+
+d. Metadata configuration
+With a texteditor edit the 'control' file and change the fields to reflect 
+your package structure. You should edit the 'Name', 'Version', 'Provides', 
+'Depends' and 'Delegate' fields. The generel format is 'Key': 'Value'.
+'Provides' and 'Depends' values are comma seperated lists of package names.
+'Delegate' sets a startable package used when your web application is started.
+
+The possible control file values are documented at:
+http://wiki.github.com/makarainc/Vostok/
+
+e. Dependency configuration
+Most likely your application will depend on at least a web server and a 
+programming language. Each of this cartridges will need special configuration
+in order to host your web application. These configuration settings are stored
+in seperate directories for each dependency.
+Create a directory named 'setup' inside the 'info' directory.
+$ cd info
+$ mkdir setup
+
+For each dependency create another directory named exactly like the cartride.
+e.g. for a PHP application create the following directory structure
+$ mkdir -p setup/php-5.2.10
+
+You can now copy your normal php.ini file to the newly created directory and 
+VPM will use the specified settings to configure your application. Currently
+VPM provides translators for PHP, Java and Apache httpd configuration files.
+
+f. Packaging
+The last step is to actually create the package. VPM provides the 'pack' command,
+which takes two parameters.
+$ vpm pack <your build directory> <output directory>
+
+If the packaging process is successful VPM has created a VPM package in the
+specified output directory. You can now deploy this package on the Vostok Cloud
+Application Platform.
+
+3. Further Documentation
+More detailed documentation will be published in the following weeks on the wiki
+or on www.makara.com
