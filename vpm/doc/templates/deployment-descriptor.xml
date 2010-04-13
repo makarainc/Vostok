@@ -1,0 +1,8 @@
+<?xml version="1.0" ?>
+<application name="test-php52">
+ <logs>
+  <log-location isPathRelative="True" path="data/logs/test-php52.log"/>
+ </logs>
+ <!--  ignore is comma seprated list ignore=".pyc, .class, .etc" -->
+ <data ignore=".pyc"/>
+</application>

@@ -1,0 +1,9 @@
+Name: mywebapp
+Version: 1.0.0
+Architecture: all
+Provides: 
+Depends: www-static.apache2, www-dynamic.apache2, php-5.2.10
+Description: Minimal demo package
+Delegate: php-5.2.10
+Type: Application
+Role: application
