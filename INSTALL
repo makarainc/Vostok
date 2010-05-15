@@ -1,0 +1,13 @@
+
+                   INSTALL
+
+1  Installation instructioins
+   
+   In the vostok/ directory created after extracting the tarball simply run
+   the provided install.sh script. This script will copy the required files
+   to /opt/vostok.
+   
+   After the installation process is finished you should add the directory 
+   /opt/vostok/bin to your path.
+   Afterwards you can use vpm to install cartridges. Some cartridges will be
+   provided by Makara on www.makara.com

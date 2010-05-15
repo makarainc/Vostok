@@ -1,0 +1,35 @@
+#!/bin/bash
+# ===========================================================================
+# Copyright 2010 Makara, Inc.  All Rights Reserved.
+#
+# This is UNPUBLISHED PROPRIETARY SOURCE CODE of Makara, Inc.  The contents
+# of this file may not be disclosed to third parties, copied or duplicated
+# in any form, in whole or in part, without the prior written permission of
+# Makara, Inc.
+# ===========================================================================
+#
+# $URL: svn+ssh://svn.oss-1701.com/vostok/trunk/util/translators/install $
+# $Date: 2010-03-13 17:32:55 +0100 (Sa, 13 Mrz 2010) $
+# $Revision: 6047 $
+
+set -e
+
+if [ "$(id -u)" != "0" ]; then
+  echo "You must be root to run this script. Aborting." >&2
+  exit 1
+fi
+
+export here=$(cd -P -- "$(dirname -- "$0")" && pwd -P)
+
+src_dir="Translators"
+
+dst_pth="/opt/vostok/lib/python2.4/$src_dir"
+src_pth="$here/$src_dir"
+
+install -v -o root -g root -m 0755 -d $dst_pth
+svn export --force "$src_pth" "$dst_pth"
+
+exit $?
+
+#
+# EOF

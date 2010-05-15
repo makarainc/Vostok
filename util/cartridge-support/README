@@ -1,0 +1,93 @@
+===========================================================================
+Copyright 2010 Makara, Inc.  All Rights Reserved.
+
+This is UNPUBLISHED PROPRIETARY SOURCE CODE of Makara, Inc.  The contents
+of this file may not be disclosed to third parties, copied or duplicated
+in any form, in whole or in part, without the prior written permission of
+Makara, Inc.
+===========================================================================
+
+$URL: svn+ssh://svn.oss-1701.com/vostok/trunk/util/cartridge-support/README $
+$Date: 2010-03-13 17:32:55 +0100 (Sa, 13 Mrz 2010) $
+$Revision: 6047 $
+
+
+
+FIXME: bring documentation up to date
+
+
+                            Vostok Cartridge API
+
+
+NAME
+	Cartridge - Interface to Vostok Cartridge Configurations
+
+SYNOPSIS
+	import Cartridge.Config
+
+	class Configuration (Cartridge.Config):
+	    default_locale = 'es_MX'
+	    config_file    = '../../etc/apache2/conf.d/clients.conf'
+
+	    def format_item(self, level, name, params):
+	        indent = '    ' * level
+                
+	        return "%s<%s/>\n" % \
+	               (indent, ' '.join(map(str, (name,) + params)))
+
+	    def format_group(self, level, name, pararms, format_content):
+                indent = '    ' * level
+                attributes = ' '.join(map(str, params))
+                str = "%s<%s %s>\n" % (indent, name, attributes)
+
+	        str += format_content(level + 1)
+                str += "%s</%s>\n" % (indent, name)
+
+                return str
+
+	    def format_scope(self, level, name, params, format_content):
+                ...
+
+	cfg = Configuration()
+
+	# Cartridge Maintainer
+        cfg.reset(<options-definitions-file>, <settings-definitions-file>)
+
+	# Configuration Server
+	pickled_data = cfg.get('en_US', cfg.advanced())
+        pickled_data = cfg.update('MyApplication', [data])
+
+        pickled_data = cfg.install('MyApplication', data)
+        pickled_data = cfg.remove('MyApplication')
+
+	# Configuration Client
+	import Cartridge.Registry
+
+	pickled_data = <RPC call to Configuration Server "get" method>
+        
+
+
+DESCRIPTION
+	This module implements configuration of Vostok cartridges through
+	three entry points:
+
+	reset(options, settings)
+	    This causes a "factory reset" of the configuration.  This call
+	    is used by the cartridge maintainer to bootstrap the options
+	    registry or reset it in the face of trouble.
+
+	get([locale], [level])
+
+
+USAGE
+
+
+SEE ALSO
+	See the following files in a cartridge of your choice:
+
+            info/configuration/configure.py
+            info/configuration/options.py
+            info/configuration/setting.py
+
+
+EOF

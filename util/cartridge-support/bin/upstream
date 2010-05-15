@@ -1,0 +1,382 @@
+#!/bin/bash
+# ===========================================================================
+# Copyright 2010 Makara, Inc.  All Rights Reserved.
+#
+# This is UNPUBLISHED PROPRIETARY SOURCE CODE of Makara, Inc.  The contents
+# of this file may not be disclosed to third parties, copied or duplicated
+# in any form, in whole or in part, without the prior written permission of
+# Makara, Inc.
+# ===========================================================================
+#
+# $URL: svn+ssh://svn.oss-1701.com/vostok/trunk/util/cartridge-support/bin/upstream $
+# $Date: 2010-03-13 17:32:55 +0100 (Sa, 13 Mrz 2010) $
+# $Revision: 6047 $
+
+# TODO: flesh out help
+# TODO: document install.map convenience functions and $ROOT/ requirement
+
+
+# kernel.org appears faster than
+# ftp://mirror.stanford.edu/pub/mirrors/centos/5.2
+
+: ${UPSTREAM_MIRROR_BASE_URL:="ftp://vault.centos.org/centos/5.2"}
+
+
+CMD=$(basename $0)
+PAD=$(echo $CMD | tr ' -z' ' ')
+ERR="  $CMD: error"
+
+USAGE="
+  Usage:
+    $CMD -h
+    $CMD [-v] fetch -a architecture -s stream -p glob-list -o output-dir
+    $CMD [-v] extract -r root package-file ...
+    $CMD [-v] list package-file ...
+    $CMD [-v] bundle -r root -o output-dir
+    $PAD             -n vostok-name -v vostok-version -i upstream-info 
+    $PAD             -a architecture
+    $PAD             install-commands-file
+"
+
+HELP="\
+  fetch:
+    Fetch packages specified in 'globlist' from a CentOS mirror according to
+    the architecture and stream parameters and saves the packages in
+    'output-dir'.  Valid values for '-a' are either 'i386' or 'x86_64'.
+    Valid values for '-s' are either 'os' or 'updates'.
+
+    A 'globlist' is a list of package globs, e.g. \"php-5* php-common-5*\".
+
+  extract:
+    Extracts the packages given into 'output-dir'.
+
+  list:
+    Lists the files in 'package-file's.
+
+  bundle:
+    Create a component bundle from files in 'root' according to the install
+    commands in 'install-commands-file' and place it in 'output-dir' under a
+    name constructed from 'vostok-name', 'upstream-info', 'vostok-version',
+    and 'architecture'. Valid values for '-a' are 'i686', 'amd64' or
+    'all'. The extension is 'bundle.tar.gz'.  See also
+
+      https://oss-1701.fogbugz.com/?W77
+
+"
+
+function error() {
+  echo -e "$ERR: $*" >&2
+}
+function notice() {
+  echo -e "$*" >&2
+}
+function print_usage() {
+  notice "$USAGE"
+}
+function print_help() {
+  print_usage
+  notice "$HELP"
+  exit 0
+}
+
+function usage_error() {
+  test -z "$1" || error "$1"
+  print_usage && exit 2
+}
+
+
+# General Options
+VERBOSE=0
+
+ARCH=
+STREAM=
+GLOBS=
+ODIR=
+RDIR=
+ICMDS=
+VNAME=
+VVERS=
+UINFO=
+
+OPTS=$(getopt -n "$ERR" \
+              -o +hv \
+              -l help \
+              -l verbose \
+              -- "$@")
+
+if test $? -ne 0; then usage_error; fi
+eval set -- "$OPTS"
+
+while true; do
+  ARG=$1; shift
+  case "$ARG" in
+    -h|--help)          print_help      ;;
+    -v|--verbose)       VERBOSE=1       ;;
+    --)                 break           ;;
+    *)
+      usage_error "bad parameter: '$ARG'"
+      ;;
+  esac
+done
+
+# Command
+test $# -ge 1 || usage_error "missing command"
+cmd=$1 ; shift
+
+SOPTS=
+LOPTS=
+
+function require_root() {
+  # can't chmod/chown without being root
+  test "$(id -u)" != "0" && error "$cmd requires root privileges." && \
+  exit 1
+}
+
+case "$cmd" in
+  fetch)
+    SOPTS="a:s:p:o:"
+    LOPTS="arch:,architecture:,stream:,packages:,output-dir:"
+    ;;
+  extract)
+    SOPTS="r:"
+    LOPTS="root:"
+    require_root
+    ;;
+  list)
+    SOPTS="+"
+    LOPTS=""
+    ;;
+  bundle)
+    SOPTS="r:o:n:i:v:a:"
+    LOPTS="root:,output-dir:"
+    LOPTS+=",vostok-name:,upstream-info:,vostok-version:,architecture:"
+    require_root
+    ;;
+  *)
+    usage_error "invalid command: '$cmd'"
+    ;;
+esac
+
+# Command Options
+test -z "$SOPTS" || OPTS=$(getopt -n "$ERR" -o $SOPTS -l $LOPTS -- "$@")
+
+if test $? -ne 0; then usage_error; exit 2; fi
+eval set -- "$OPTS"
+while true; do
+  ARG=$1; shift
+  case "$ARG" in
+    -a|--arch|--architecture)
+      ARCH="$1"; shift
+      if [ "$cmd" == "bundle" ]; then   # bundle needs vostok architecture
+        case "$ARCH" in
+          i686|amd64|all)                                             ;;
+                       *) usage_error "invalid architecture: '$ARCH'" ;;
+        esac
+      else                              # fetch needs RHEL architecture
+        case "$ARCH" in
+          i386|x86_64)                                             ;;
+                    *) usage_error "invalid architecture: '$ARCH'" ;;
+        esac
+      fi
+      ;;
+    -s|--stream)
+      STREAM="$1"; shift
+      case "$STREAM" in
+        os|updates|extras)
+          ;;
+        *)
+          usage_error "invalid stream specifier: '$STREAM'"
+          ;;
+      esac
+      ;;
+    -p|--packages)
+      GLOBS="$1"; shift
+      ;;
+    -n|--vostok-name)
+      VNAME="$1"; shift
+      ;;
+    -v|--vostok-version)
+      VVERS="$1"; shift
+      ;;
+    -i|--upstream-info)
+      UINFO="$1"; shift
+      ;;
+    -o|--output-dir)
+      ODIR="$1"; shift
+      ;;
+    -r|--root)
+      RDIR="$1"; shift
+      ;;
+    --)
+      break
+      ;;
+    *)
+      usage_error "bad option '$ARG'"
+      ;;
+  esac
+done
+
+
+# Ensure required parameters have been given
+function require_option() {
+  test -z "$1" && usage_error "the $2 option is required"
+}
+
+PACKAGES=
+
+case "$cmd" in
+  fetch)
+    require_option "$ARCH" "-a/--architecture"
+    require_option "$STREAM" "-s/--stream"
+    require_option "$GLOBS" "-p/--packages"
+    require_option "$ODIR" "-o/--output-dir"
+    test $# -gt 0 && \
+      usage_error "'$cmd' does not accept non-option parameters: '$@'"
+    ;;
+  extract)
+    require_option "$RDIR" "-r/--root"
+    test $# -eq 0 && \
+      usage_error "'$cmd' requires at least one package parameter"
+    PACKAGES="$@"
+    ;;
+  list)
+    test $# -eq 0 && \
+      usage_error "'$cmd' requires at least one package parameter"
+    PACKAGES="$@"
+    ;;
+  bundle)
+    require_option "$RDIR" "-r/--root"
+    require_option "$ODIR" "-o/--output-dir"
+    require_option "$VNAME" "-n/--vostok-name"
+    require_option "$UINFO" "-v/--vostok-version"
+    require_option "$UINFO" "-i/--upstream-info"
+    test $# -ne 1 && \
+      usage_error "'$cmd' requires exactly one file parameter"
+    ICMDS="$1"
+    ;;
+esac
+
+
+
+#
+# Prerequisites
+
+set -e
+
+CLEANUP=""
+
+function cleanup_ok() {
+  eval $CLEANUP
+  /bin/true
+}
+
+function cleanup_err() {
+  eval $CLEANUP
+  /bin/false
+}
+
+trap cleanup_ok  EXIT
+trap cleanup_err INT QUIT TERM
+
+function mk_dir() {
+  test -e "$1" && test -d "$1" || \
+      mkdir -p "$1" && CLEANUP="$CLEANUP rmdir -p \"$1\" 2>/dev/null;"
+}
+
+# auto-create output directories if they don't exist (but remember to clean up)
+
+function ensure_prog() {
+  p=$(which "$1")
+
+  if test -z "$p"; then
+    error "'$1' command not found."
+    exit 1
+  else
+    echo -n "$p"
+  fi
+}
+
+
+case "$cmd" in
+  fetch)
+    WGET=$(ensure_prog wget)
+    mk_dir "$ODIR"
+    ;;
+  extract)
+    RPM2CPIO=$(ensure_prog rpm2cpio)
+    CPIO=$(ensure_prog cpio)
+    mk_dir "$RDIR"
+    ;;
+  list)
+    RPM=$(ensure_prog rpm)
+    ;;
+  bundle)
+    TAR=$(ensure_prog tar)
+    mk_dir "$ODIR"
+    ;; 
+esac
+
+
+#
+# Action
+
+# convenience functions for use in ICMDS file.  FIXME document
+# Note: install commands must use 'i' convenience function or prefix source
+# pathnames with "$ROOT/" manually.  FIXME document
+
+function i() {
+  # NOTE: since we want to support globbing we can't quote the -2:1 term,
+  # which makes this function break on filenames containing spaces.
+  install -vpm ${@:1:$# - 2} $ROOT/${@: -2:1} "${@: -1:1}"
+}
+function d() {
+  install -vpm "$@"
+}
+
+
+case "$cmd" in
+  fetch)
+    URL=$UPSTREAM_MIRROR_BASE_URL
+    case "$STREAM" in
+      os)      URL+="/os/${ARCH}/CentOS"    ;;
+      updates) URL+="/updates/${ARCH}/RPMS" ;;
+      extras)  URL+="/extras/${ARCH}/RPMS"  ;;
+    esac;
+    (cd "$ODIR" &&
+       for glob in $GLOBS; do
+         "$WGET" -nv "$URL/$glob"
+       done
+    )
+    ;;
+  extract)
+    for pkg in $PACKAGES; do
+      "$RPM2CPIO" "$pkg" | (cd "$RDIR" && "$CPIO" -idmv)
+    done
+    ;;
+  list)
+    for pkg in $PACKAGES; do
+      echo -e "\n$pkg"
+      "$RPM" -q --list -v -p "$pkg" 2>/dev/null
+    done
+    ;;
+  bundle)
+    i_file=$(basename "$ICMDS")
+    i_dir=$(cd -P -- "$(dirname -- "$ICMDS")" && pwd -P)
+
+    ROOT="$(cd -P -- "$RDIR" && pwd -P)"
+    NAME="$ODIR/${VNAME}_${VVERS}_${UINFO}_${ARCH}.bundle.tar.gz"
+
+    TMP_ROOT=$(mktemp -d -t bundle.XXXXXX) && {
+      chmod 755 "$TMP_ROOT" && \
+      (cd "$TMP_ROOT" && . "$i_dir/$i_file") && \
+      (cd "$TMP_ROOT" && "$TAR" zcf - .) | cat - > "$NAME" && \
+      notice "created '$NAME'"
+      rm -rf "$TMP_ROOT" 
+    }
+    ;;
+esac
+
+exit 0
+
+#
+# EOF

@@ -1,0 +1,149 @@
+#!/usr/bin/env python
+# ===========================================================================
+# Copyright 2010 Makara, Inc.  All Rights Reserved.
+#
+# This is UNPUBLISHED PROPRIETARY SOURCE CODE of Makara, Inc.  The contents
+# of this file may not be disclosed to third parties, copied or duplicated
+# in any form, in whole or in part, without the prior written permission of
+# Makara, Inc.
+# ===========================================================================
+#
+# $URL: svn+ssh://svn.oss-1701.com/vostok/trunk/util/translators/bin/translator $
+# $Date: 2010-03-13 17:32:55 +0100 (Sa, 13 Mrz 2010) $
+# $Revision: 6047 $
+
+import os
+import os.path
+import sys
+
+from optparse import OptionParser
+
+import Translators
+
+#
+# Constants
+# ---------
+
+SUPPORTED_MODULES = frozenset(['Apache','PHP'])
+
+NAME = 'translator'
+PAD  = ' ' * len(NAME)
+
+VERSION = '0.9'
+
+USAGE_CORE = """
+  %s -h
+  %s [-s options-set] [-l locale]
+  %s {-c cartridge | -r registry.db |
+  %s  -o options.py -d default_locale}
+  %s type config-file""" % (NAME, NAME, PAD, PAD, PAD)
+
+USAGE = 'Usage:' + USAGE_CORE + "\n"
+
+HELP = """\
+This program takes a supported configuration file, validates the directives
+found in it, and prints a Vostok settings representation of the sanitized
+configuration to stdout, ready to be applied to a supported cartridge.
+
+An options database to validate the configuration settings against can be
+specified either by passing a cartridge root path via the '-c' option, or
+directly a compiled registry.db file or an options.py source file via the
+'-r' and '-o' options, respectively. If the '-o' option is given, a default
+locale to use with the database needs to be specified as well.
+
+The configuration settings may be validated against a subset of the options
+database by passing one of the three levels 'normal', 'advanced', or
+'expert' via the '-s' option.
+
+Descriptive help strings for problematic options may be returned in an
+alternative locale (if supported by the options database) by passing the
+'-l' option."""
+
+
+Parser = OptionParser(usage   = USAGE_CORE,
+                      #epilog  = HELP,
+                      version = '%s v%s' % (NAME, VERSION))
+
+Parser.add_option('-s', '--options-set',
+                  type    = 'string',
+                  default = None,
+                  action  = 'store',
+                  dest    = 'level',
+                  help    = "'normal', 'advanced', or 'expert' (default)")
+Parser.add_option('-l', '--locale',
+                  type    = 'string',
+                  default = None,
+                  action  = 'store',
+                  dest    = 'locale',
+                  help    = "use a specific locale instead of the default")
+Parser.add_option('-c', '--cartridge',
+                  type    = 'string',
+                  default = None,
+                  action  = 'store',
+                  dest    = 'cartridge',
+                  help    = "path of cartridge to validate options against")
+Parser.add_option('-r', '--registry',
+                  type    = 'string',
+                  default = None,
+                  action  = 'store',
+                  dest    = 'registry',
+                  help    = "path of registry.db to validate options against")
+Parser.add_option('-o', '--options',
+                  type    = 'string',
+                  default = None,
+                  action  = 'store',
+                  dest    = 'options',
+                  help    = "path of options.py to validate options against")
+Parser.add_option('-d', '--default-locale',
+                  type    = 'string',
+                  default = None,
+                  action  = 'store',
+                  dest    = 'default_locale',
+                  help    = "default locale (required if -o option is used)")
+
+
+#
+# Options
+# -------
+
+Opts, Args = Parser.parse_args()
+
+if len(Args) != 2:
+    sys.stderr.write(USAGE)
+    sys.exit(2)
+
+opts = Translators.Config(level          = Opts.level,
+                          locale         = Opts.locale,
+                          cartridge      = Opts.cartridge,
+                          registry       = Opts.registry,
+                          options        = Opts.options,
+                          default_locale = Opts.default_locale)
+
+#
+# Configuration
+# -------------
+
+type = Args[0]
+config = Args[1]
+
+try:
+    if type in SUPPORTED_MODULES:
+        if type == 'Apache':
+            translator = Translators.Apache()
+        elif type == 'PHP':
+            translator = Translators.PHP()
+            
+        res, err = translator.translate_file(config, opts)
+        if err:
+            sys.stderr.write(err)
+        sys.stdout.write(res)
+
+    else:
+        sys.stderr.write(("Unsupported translator module: %s" % type))
+        sys.exit(1)    
+except Translators.TranslatorException, e:
+    sys.stderr.write("Error")
+    sys.exit(1)        
+
+#
+# EOF

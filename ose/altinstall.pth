@@ -1,0 +1,2 @@
+import os, site; site.addsitedir("/opt/vostok/lib/python2.4/site-packages");  site.addsitedir("/opt/vostok/lib/python2.4")
+
