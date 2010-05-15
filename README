@@ -1,6 +1,5 @@
 
-
-				   README
+                   README
 
 
    Welcome to Makara's Open Source Cloud Application Platform. This Edition is
@@ -106,8 +105,16 @@
    "<myapp>_<version>.vpm" package in the specified output directory. You
    can now deploy this package onto the Vostok Cloud Application Platform.
 
+3  Working with installed packages
 
-3  Further Documentation
+   The interaction with installed packages happens through the vpm command.
+   The available commands are shown when vpm is called without any arguments.
+   Packages are installed with the <vpm install> command and can be removed with
+   the <vpm remove> or <vpm purge> commands.
+   Starting and stopping applications are handled with the <vpm start> and
+   <vpm stop> commands.
+   
+4  Further Documentation
 
    More detailed documentation will be published as we go on the wiki or on
    http://www.makara.com/.

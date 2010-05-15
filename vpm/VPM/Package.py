@@ -15,8 +15,8 @@
 # ===========================================================================
 #
 # $URL: svn+ssh://svn.oss-1701.com/vostok/trunk/vpm/VPM/Package.py $
-# $Date: 2010-04-10 00:29:29 +0200 (Sa, 10 Apr 2010) $
-# $Revision: 6599 $
+# $Date: 2010-05-15 21:40:49 +0200 (Sa, 15 Mai 2010) $
+# $Revision: 7394 $
 
 import copy
 import fcntl
@@ -38,77 +38,19 @@ import xml.dom.minidom
 from subprocess import call, Popen, PIPE
 
 from VPM.Constants import *
-from VPM.DB import DB, DBError
 from VPM.Environment import Environment
 from VPM.Lock import LockError, Lock
 from VPM.Utils import read_file, write_file
+from VPM.Exceptions import *
+from VPM.DB import *
+from VPM.ControlInfo import *
 
-
-class ControlFileError (ValueError):
-    pass
-
-class PackageError (ValueError):
-    pass
-
-class HookError (OSError):
-    pass
-
-
-# This is outdated
-# Paths tend to get a bit confusing when dealing with (i.e. building,
-# packaging, unpackaging, installing, or removing/purging) packages, so here
-# is the the nomenclature used throughout the Package class.  The
-# single-letter codes are:
-#
-#   'r' = root
-#   'p' = prefix
-#   'b' = basename (name w/o extension)
-#   'e' = extension
-#   'n' = full name (= name w/extension)
-#
-# Build Hierarchy:
-#
-#             ../../tmp/build/opt/cartridges/www-static/apache2-2.2.3
-#   bld_r__   ---------------
-#   bld__p_                   -------------------------
-#   bld___n                                             -------------
-#   bld_rp_   -----------------------------------------
-#   bld__pn                   ---------------------------------------
-#   bld_rpn   -------------------------------------------------------
-#
-# Packaging Hierarchy:
-#
-#             ../../tmp/tmpXXXXXX/www-static.apache2_2.2.3_1_i386.vpm
-#   pkg_r_    -------------------
-#   pkg__b                        -------------------------------
-#   pkg__e                                                       ----
-#   pkg_rb    ---------------------------------------------------
-#   pkg__n                        -----------------------------------
-#   pkg_rn    -------------------------------------------------------
-#
-# Destination Hierarchy:
-#
-#             ../../tmp/www-static.apache2_2.2.3_1_i386.vpm
-#   dst_r_    ---------
-#   dst__b              -------------------------------
-#   dst__e                                             ----
-#   dst_rb    -----------------------------------------
-#   dst__n              -----------------------------------
-#   dst_rn    ---------------------------------------------
-#
-# Installation Hierarchy:
-#
-#             ../../tmp/opt/cartridges/www-static/apache2-2.2.3
-#   ins_r__   ---------
-#   ins__p_             -------------------------
-#   ins___n                                       -------------
-#   ins_rp_   -----------------------------------
-#   ins__pn             ---------------------------------------
-#   ins_rpn   -------------------------------------------------
-#
-# Other Hierarchies are named accordingly.
-
+##
 class Package (object):
+    '''
+    Package
+    '''
+    
     __ACTION_INSTALL = 'install'
     __ACTION_REMOVE = 'remove'
     __ACTION_PURGE = 'purge'
@@ -220,8 +162,8 @@ class Package (object):
                 raise OSError("failed to copy '%s' from '%s' to '%s': %s" %
                               (name, s_d, d_d, e))
         else:
-            _tree_copy(s_d, name, d_d)
-            _rm_rf(os.path.join(s_d, name))
+            Package._tree_copy(s_d, name, d_d)            
+            Package._rm_rf(os.path.join(s_d, name))
 
     @staticmethod
     def _import_module(name, location):
@@ -252,10 +194,10 @@ class Package (object):
                 self._rm_rf(lock_file)
             
             del self.__locks[path]
-
-    # zipfile.extractall() method only available in python >= 2.6
+    
     @staticmethod
     def _extract_archive(archive, inst_root, gz = False):
+        # zipfile.extractall() method only available in python >= 2.6
         cmd = [BIN_UNZIP, '-qq', archive, '-d', inst_root]
         rc = call(cmd)
 
@@ -369,12 +311,23 @@ class Package (object):
 
         for line in lines:
             k, v = line.strip().split("\t")
-
-            mapping[k.strip()] = v.strip()
+            m = re.match('^(?P<name>.*) (?P<op><|<=|==|>=|>) (?P<version>.*)$', k.strip())
+            
+            if m is not None:
+                name = m.group('name')
+                op = m.group('op')
+                ver = m.group('version')
+                
+                map = {'name'   :   name,
+                       'version':   ver,
+                       'string' :   ("lambda v: v %s '%s'" % (op, ver)),
+                       'dir'    :   v.strip()
+                       }
+                
+                mapping[name] = map
 
         return mapping
 
-    # FIXME this can be refactored better
     def _load_control_info_from_archive(self, archive, cfile):
         cdata = archive.read(cfile)
         cinfo = self._parse_declarations(cdata.splitlines(), cfile)
@@ -398,7 +351,8 @@ class Package (object):
 
     def _load_control_info_from_tree(self, cfile):
         cdata = read_file(cfile, True)
-        cinfo = self._parse_declarations(cdata.splitlines(), cfile)
+        
+        cinfo = ControlInfo(cdata, cfile)
 
         return cinfo
 
@@ -414,39 +368,6 @@ class Package (object):
 
         return binfo
 
-    def _load_from_db_aux(self, name, ext):
-        f = name + '.' + ext
-        d = self.__pdb.read_package_file(f)
-        i = self._parse_declarations(d.splitlines(), f)
-
-        return i
-
-    def _load_control_info_from_db(self, name):
-        return self._load_from_db_aux(name, CONTROL_FILE_NAME)
-
-    def _load_build_info_from_db(self, name):
-        return self._load_from_db_aux(name, BUILD_FILE_NAME)
-
-    def _load_location_info_from_db(self, name):
-        return self._load_from_db_aux(name, LOCATION_FILE_NAME)
-
-
-    @staticmethod
-    def _validate_fields(hash, required, optional, pathname):
-        for k in required:
-            if k not in hash:
-                raise ControlFileError("%s: missing required field '%s'" %
-                                       (pathname, k))
-            if not hash[k]:
-                if k not in frozenset([KEY_INSN]): # may be empty
-                    raise ControlFileError("%s: missing value for required "
-                                           "field '%s'" % (pathname, k))
-
-        for k in hash.keys():
-            if k not in required and k not in optional:
-                raise ControlFileError("%s: unknown field '%s'" %
-                                       (pathname, k))
-
     @staticmethod
     def _safe_quote(string):
         # Note: all strings are required to be UTF-8, so we don't encode here
@@ -456,219 +377,6 @@ class Package (object):
         s = re.sub('_', '%5F', s)
 
         return s
-
-    # There is nothing "safe" about this one--just making the name symmetric
-    # to "_safe_quote".
-    @staticmethod
-    def _safe_unquote(string):
-        return urllib.unquote(string)
-
-    # "provides" is parsed according to this grammar:
-    #
-    #   list    := [{expr{, expr}*}?]
-    #   expr    := [token{'\s*(\s*' version '\s*)\s*'}?]
-    #   token   := '\w[-+.:\w]*'
-    #   version := '[-+.:\w]+'
-    #
-    # Example:
-    #
-    #   Name: www-static.apache2
-    #   Version: 2.2.3-1
-    #   Provides: www-static
-    #
-    #   The structure is initialized with the expression constructed from
-    #   the 'Name' and 'Version' fields, then the 'Provides' line is parsed
-    #   and its expressions appended.
-    #
-    #   => [{'Name'    : 'www-static.apache2',
-    #        'Version' : '2.2.3',
-    #        'String'  : 'www-static.apache2 (2.2.3)'},
-    #       {'Name'    : 'www-static',
-    #        'Version' : None,
-    #        'String'  : 'www-static.apache2'}]
-    #
-    @staticmethod
-    def _canonicalize_provides(name, version, string, file):
-        res = [{KEY_NAME : name,
-                KEY_VERS : version,
-                KEY_STR  : name + ' (' + version + ')'}]
-
-        if string is not None and not re.match('^\s*$', string):
-            seq = re.split('\s*,\s*', string)
-
-            for s in seq:
-                m = re.match('^\s*' +
-                             '(?P<name>\w[-+.:\w]*)' +
-                             '(?:\s*\(\s*' +
-                             '(?P<version>\S*)' +
-                             '\s*\)\s*)?$',
-                             s)
-
-                if not m:
-                    raise ControlFileError("%s: bad tag '%s' in '%s'" % \
-                                           (file, s, string))
-                else:
-                    n = m.group('name')
-                    v = m.group('version') or version
-
-                    val = {KEY_NAME : n,
-                                KEY_VERS : v,
-                                KEY_STR  : n + (v and ' (' + v + ')' or '')}
-                    if val not in res:
-                        res.append(val)
-
-        return res
-
-    @staticmethod
-    def _provides2str(exprs, name):
-        conj = []
-
-        for e in exprs:
-            # FIXME the 'Name' and 'Version' dictionary keys should be
-            # really KEY_NQUO and KEY_VQUO since their respective values
-            # must be quoted.
-            if e[KEY_NAME] is not name: # omit name (provided automatically)
-                conj.append(e[KEY_STR])
-
-        return ', '.join(conj)
-
-
-
-    # "Depends", and "Conflicts" are parsed according to
-    # this grammar which is basically lifted from Debian (except the
-    # operators are pythonic and we don't allow "${}" stuff):
-    #
-    #   list    := [{clause{, clause}*}?]
-    #   clause  := [expr{ '\s*|\s*' expr}*]
-    #   expr    := [token{'\s*(\s*' op '\s+' version '\s*)\s*'}?]
-    #   token   := '\w[-+.:\w]*'
-    #   op      := {'<' | '<=' | '==' | '>=' | '>'}
-    #   version := '[-+.:\w]+'
-    #
-    # Example:
-    #
-    #   'mysql (>= 5), apache | lighttpd (>= 1.5)'
-    #
-    # is normalized to a logical tree structure:
-    #
-    #   seq(or(expr('mysql', '(>= 5)')),
-    #       or(expr('apache'),
-    #          expr('lighttpd', '(>= 1.5)')))
-    #
-    # and represented in Python as:
-    #
-    #   [[{'Name'      : 'mysql',
-    #      'Predicate' : lambda v: v >= '5.1',
-    #      'String'    : 'mysql (>= 5)'}],
-    #    [{'Name'      : 'apache2',
-    #      'Predicate' : None,
-    #      'String'    : 'apache2'},
-    #     {'Name'      : 'lighttpd',
-    #      'Predicate' : lambda v: v >= '1.5',
-    #      'String'    : 'lighttpd (>= 1.5)'}]]
-    #
-    @staticmethod
-    def _canonicalize_relation(string, file):
-        res = None
-
-        if string is not None and not re.match('^\s*$', string):
-            seq = re.split('\s*,\s*', string)
-
-            for i, s in enumerate(seq):
-                exp = seq[i] = re.split('\s*\|\s*', s)
-
-                for j, e in enumerate(exp):
-                    m = re.match('^\s*' +
-                                 '(?P<name>\w[-+.:\w]*)' +
-                                 '(?:\s*\(\s*' +
-                                 '(?P<op><|<=|==|>=|>)' +
-                                 '\s*' +
-                                 '(?P<version>[-+.:\w]+)' +
-                                 '\s*\)\s*)?$',
-                                 e)
-
-                    if not m:
-                        raise ControlFileError("%s: bad tag '%s' in '%s'" % \
-                                               (file, e, string))
-                    else:
-                        n = m.group('name')
-                        o = m.group('op') or None
-                        v = m.group('version') or None
-                        p = o and ("lambda v: v %s '%s'" % (o, v)) or None
-                        t = o and ' (%s %s)' % (o, v) or ''
-
-                        exp[j] = {KEY_NAME : n,
-                                  KEY_PRED : p,
-                                  KEY_STR  : n + t}
-
-            res = seq
-
-        return res
-
-    @staticmethod
-    def _relation2str(exprs):
-        conj = []
-
-        for cj in exprs:
-            disj = []
-
-            for dj in cj:
-                disj.append(dj[KEY_STR])
-
-            conj.append(' | '.join(disj))
-
-        return ', '.join(conj)
-
-
-
-    def _process_control_info(self, cinfo, cfile):
-        self._validate_fields(cinfo, CKEYS_REQ, CKEYS_OPT, cfile)
-
-        # OK, now merge with default info so we can move on
-        for k, v in CINFO_DEFAULT.iteritems():
-            cinfo.setdefault(k, v)
-
-        # add quoted versions of the user-controlled name and version keys
-        cinfo[KEY_NQUO] = self._safe_quote(cinfo[KEY_NAME])
-        cinfo[KEY_VQUO] = self._safe_quote(cinfo[KEY_VERS])
-
-        # ensure arch has a known value
-        if cinfo[KEY_ARCH] not in VALS_ARCH:
-            raise ControlFileError("%s: unknown architecture '%s'" %
-                                   (cfile, cinfo[KEY_ARCH]))
-
-        if cinfo[KEY_TYPE] not in VALS_TYPE:
-            raise ControlFileError("%s: unkonw package type '%s'" %
-                                   (cfile, cinfo[KEY_TYPE]))
-
-        # canonicalize optional values
-        prov = KEY_PROV in cinfo and cinfo[KEY_PROV] or None
-        cinfo[KEY_PROV] = self._canonicalize_provides(cinfo[KEY_NQUO],
-                                                      cinfo[KEY_VQUO],
-                                                      prov,
-                                                      cfile)
-        
-        # FIXME: maybe ensure package doesn't depend on or conflict with itself
-        for key in (KEY_DEPS, KEY_CONF):
-            if key in cinfo:
-                cinfo[key] = self._canonicalize_relation(cinfo[key], cfile)
-            else:
-                cinfo[key] = None
-
-        if not KEY_DESC in cinfo:
-            cinfo[KEY_DESC] = None
-
-        return cinfo
-
-    def _process_build_info(self, binfo, bfile):
-        self._validate_fields(binfo, BKEYS_REQ, BKEYS_OPT, bfile)
-
-        return binfo
-
-    def _process_location_info(self, linfo, lfile):
-        self._validate_fields(linfo, LKEYS_REQ, LKEYS_OPT, lfile)
-
-        return linfo
 
     def _load_info_from_archive(self, archive):
         '''
@@ -682,14 +390,9 @@ class Package (object):
         cinfo = self._load_control_info_from_archive(archive, cfile)
         binfo = self._load_build_info_from_archive(archive, bfile)
 
-        self._process_control_info(cinfo, cfile)
+        info = ControlInfo(cinfo, cfile)
 
-        info = cinfo
-        info.update(binfo)
-
-        info[KEY_INSR] = ''
-        info[KEY_INSN] = info[KEY_NAME]
-        info[KEY_PSTATE] = PSTATE_VIRGIN
+        info.setBuildInfo(binfo)
 
         return info
 
@@ -704,20 +407,18 @@ class Package (object):
         cinfo = self._load_control_info_from_tree(cfile)
         binfo = None
 
-        self._process_control_info(cinfo, cfile)
+        if not isinstance(cinfo, ControlInfo):
+            info = ControlInfo(cinfo, cfile)
+        else:
+            info = cinfo
 
         if os.path.exists(bfile):
             binfo = self._load_build_info_from_tree(bfile)
-            self._process_build_info(binfo, bfile)
+            info._process_build_info(binfo, bfile)
         else:
             binfo = self._load_build_info_from_tree(None)
 
-        info = cinfo
-        info.update(binfo)
-
-        info[KEY_INSR] = ''
-        info[KEY_INSN] = info[KEY_NAME]
-        info[KEY_PSTATE] = PSTATE_VIRGIN
+        info.setBuildInfo(binfo)
 
         return info
 
@@ -725,39 +426,20 @@ class Package (object):
         cinfo = self._load_control_info_from_tree(cfile)
         binfo = self._load_build_info_from_tree(bfile)
 
-        self._process_control_info(cinfo, cfile)
-        self._process_build_info(binfo, bfile)
+        #info = ControlInfo(cinfo, cfile)
+        cinfo._process_build_info(binfo, bfile)
 
-        info = cinfo
-        info.update(binfo)
+        cinfo.setBuildInfo(binfo)
 
-        return info
-
-    def _load_info_from_db(self, name):
-#        cinfo = self._load_control_info_from_db(name)
-#        binfo = self._load_build_info_from_db(name)
-#        linfo = self._load_location_info_from_db(name)
-#
-#        self._process_control_info(cinfo, CONTROL_FILE_NAME)
-#        self._process_build_info(binfo, BUILD_FILE_NAME)
-#        self._process_location_info(linfo, LOCATION_FILE_NAME)
-#
-#        info = cinfo
-#        info.update(binfo)
-#        info.update(linfo)
-        info = self.db().lookup(name)
-
-        return info
-
+        return cinfo
 
     # Packing/Unpacking - - - - - - - - - - -
-
     @staticmethod
     def _make_package_name(info):
-        return info[KEY_NQUO] + '_' + \
-               info[KEY_VQUO] + '-' + \
-               info[KEY_BUIL] + '_' + \
-               info[KEY_ARCH]
+        return info.QuotedName + '_' + \
+               info.QuotedVersion + '-' + \
+               info.Build + '_' + \
+               info.Architecture
 
     @staticmethod
     def _sign(car_rpn):                 # FIXME: implement
@@ -789,7 +471,7 @@ class Package (object):
 
     @staticmethod
     def _write_default_build_file(pathname):
-        data = BUILD_FORMAT % (KEY_BUIL, VAL_BUIL_DEFAULT)
+        data = "%s: %s\n" % (KEY_BUIL, VAL_BUIL_DEFAULT)
 
         return write_file(pathname, data)
 
@@ -958,7 +640,6 @@ class Package (object):
 
         return res, pkg_name
 
-
     def _unpack(self, package):
         '''
         Extract VPM package file
@@ -987,7 +668,12 @@ class Package (object):
 
 
     # Installation/Removal- - - - - - - - - -
-    def _set_default_hook_env(self, pkg_root):
+    def _set_default_hook_env(self, pkg_root, pkg_name):
+        '''
+        set environment variables set when hook scripts are executed
+        @param pkg_root:
+        @param pkg_name:
+        '''
         bundle_root = os.path.join(pkg_root, BUNDLE_DIR_NAME)
 
         hook_env = {}
@@ -996,8 +682,10 @@ class Package (object):
             hook_env[key] = os.path.join(bundle_root, DOT_DATA_DIR_NAME, dir)
 
         hook_env['VS_HOME'] = bundle_root
+        hook_env['VS_NAME'] = pkg_name
 
         return hook_env
+
 
     def _run_hook(self, cmd, env = None):
         '''
@@ -1035,12 +723,16 @@ class Package (object):
                     try:
                         out = None
                         err = None
+                        
+                        hook_drop_priority=lambda :os.nice(HOOK_ADJ_PRIORITY)
 
                         if env:
                             p = Popen(cmd, env = e,
+                                      preexec_fn=hook_drop_priority,
                                       stdout = PIPE, stderr = PIPE)
                         else:
                             p = Popen(cmd,
+                                      preexec_fn=hook_drop_priority,
                                       stdout = PIPE, stderr = PIPE)
                         (out, err) = p.communicate()
                         r = p.returncode
@@ -1066,10 +758,10 @@ class Package (object):
         Cartridge configuration helper
         '''
         #package install root
-        root = info[KEY_INSR] or self.env.install_root
+        root = info.InstallRoot or self.env.install_root
 
         #package install path
-        crt_install_path = os.path.join(root, info[KEY_INSN])
+        crt_install_path = os.path.join(root, info.InstallName)
 
         #configure file
         crt_config_file = os.path.join(crt_install_path,
@@ -1093,6 +785,13 @@ class Package (object):
             if action is Package.__ACTION_INSTALL:
                 s = None
                 d = None
+                
+                # merge configuration options if package type is cartridge
+                #if info.Type == VAL_TYPE_CRT:
+                # for each dependency:
+                # load settings and options from info/setup/<dependency>/<settings|options>.py
+                #    append optionsdata, call cfg.append
+                #    append settingsdata    
 
                 if os.path.isfile(path):
                     s = path
@@ -1113,14 +812,14 @@ class Package (object):
                                       "  owner    : %s\n"
                                       "  settings : %s\n"
                                       "  files    : %s\n") % \
-                                     (info[KEY_NAME], owner, s, d))
+                                     (info.Name, owner, s, d))
                 cfg.install(owner, s, d)
             elif action is Package.__ACTION_REMOVE:
                 if self.env.trace_hooks:
                     sys.stderr.write(("[Package.cfg_cartridge] disfiguring "
                                       "%s\n"
                                       "  owner    : %s\n") % \
-                                     (info[KEY_NAME], owner))
+                                     (info.Name, owner))
                 cfg.remove(owner)
 
             if os.path.exists(p):       # may not exist (e.g. php)
@@ -1158,7 +857,7 @@ class Package (object):
 
         return str
 
-    def _interpolate_vshome(self, pkg_root, provider, settings_dir):
+    def _interpolate_vshome(self, pkg_name, pkg_root, provider, settings_dir, action = ''):
         #create tmp directory t, copy p over to tmp directory t
         tmp_settings = self._mktmpd()
 
@@ -1167,17 +866,49 @@ class Package (object):
         files = self._tree_list(tmp_settings)
         #run replace operation on any file in t
 
-        pattern = re.compile('(@VS_HOME|@\{VS_HOME\}|@\{.*:VS_HOME\})',
-                              re.UNICODE & re.MULTILINE)
+        vs_re = '(@VS_(HOME|TMP|ACTION|CACHE|SHARE|LOGS|LOCAL)|@\{VS_(HOME|TMP|ACTION|CACHE|SHARE|LOGS|LOCAL)\}|@\{%s:VS_(HOME|TMP|ACTION|CACHE|SHARE|LOGS|LOCAL)\})' % \
+                      re.escape(pkg_name)
+        vs_pattern = re.compile(vs_re, re.UNICODE & re.MULTILINE)
+        
+        vs_helper_re = 'VS_(.*)'
+        vs_helper_p = re.compile(vs_helper_re, re.UNICODE & re.DOTALL)
+        
+        #'VS_HOME','VS_TMP','VS_ACTION','VS_CACHE','VS_SHARE','VS_LOGS','VS_LOCAL'
+        vs_match = {}
+        vs_match['VS_HOME'] = os.path.join(pkg_root, BUNDLE_DIR_NAME)
+        vs_match['VS_TMP'] = os.path.join(pkg_root, BUNDLE_DIR_NAME, DOT_DATA_DIR_NAME, 'tmp')
+        vs_match['VS_ACTION'] = action
+        vs_match['VS_CACHE'] = os.path.join(pkg_root, BUNDLE_DIR_NAME, DOT_DATA_DIR_NAME, 'cache')
+        vs_match['VS_SHARE'] = os.path.join(pkg_root, BUNDLE_DIR_NAME, DOT_DATA_DIR_NAME, 'share')
+        vs_match['VS_LOGS'] = os.path.join(pkg_root, BUNDLE_DIR_NAME, DOT_DATA_DIR_NAME, 'logs')
+        vs_match['VS_LOCAL'] = os.path.join(pkg_root, BUNDLE_DIR_NAME, DOT_DATA_DIR_NAME, 'tmp')
+        
+        #define match helper function
+        def vs_function(match):
+            (m1, m2, m3) = match.group(2,3,4)
 
-        vs_home = os.path.join(pkg_root, BUNDLE_DIR_NAME)
+            m = None
+            if m1 is not None:
+                m = m1
+            elif m2 is not None:
+                m = m2
+            elif m3 is not None:
+                m = m3
+            
+            mm = 'VS_'+m
+            if mm in vs_match:
+                return vs_match[mm]
+            else:
+                return match.group(0)
 
         for filename in files:
             filedata = read_file(filename)
 
             #replace variables with bundle_root
-            filedata = re.sub(pattern, vs_home, filedata)
+            filedata = re.sub(vs_pattern, vs_function, filedata)
 
+            print filedata
+            
             write_file(filename, filedata)
 
         return tmp_settings
@@ -1203,9 +934,7 @@ class Package (object):
             hook = os.path.join(hook_root, DECONFIGURE_NAME)
             cmd = [hook, pkg_name]
 
-        #FIXME: substitute variables
-
-        conf_h_env = self._set_default_hook_env(pkg_root)
+        conf_h_env = self._set_default_hook_env(pkg_root, pkg_name)
 
         self._run_hook(cmd, conf_h_env)
 
@@ -1216,69 +945,86 @@ class Package (object):
                 SETTINGS_MAP_NAME))
         
         if mapping is not None:
-            mapped = None
-            
-            # find version information from dependency info
-            mapped = mapping.get(version, None)
-            
+            mapped = mapping.get(feature, None)
+
             if mapped is not None:
-                str = self._safe_quote(mapped)
+                if eval(mapped['string'])(version):
+                    str = self._safe_quote(mapped['dir'])
+                else:
+                    str = self._convert_version_string(feature, 
+                                                       version)
             else:
                 str = self._convert_version_string(feature, 
-                    version)
+                                                   version)
         else:
-            str = self._safe_quote(feature)
+            str = self._convert_version_string(feature, 
+                    version)
             
         return str
 
     def _cfg_cartridges(self, action, info, pkg_root):
+        '''
+        Apply package configuration to dependee cartridges
+        @param action:
+        @param info:
+        @param pkg_root:
+        '''
         settings_root = os.path.join(pkg_root, META_DIR_NAME, SETTINGS_DIR_NAME)
-
-        name = info[KEY_NAME]
-
-        if info[KEY_DEPS]:
+        
+        if info.Depends:
             # Load package dependency table information
 
-            dt = self.db().get_dependency_table_info(name)
+            dt = self.db().get_dependency_table_info(info.Name)
             if dt is None:
                 return None
 
             for pkg in dt:
                 if action is Package.__ACTION_INSTALL:
-                    feature = pkg[KEY_DT_PROV][KEY_DT_PROV_SF]
-                    provider = pkg[KEY_DT_PROV][KEY_NAME]
+                    if pkg.Provider is None:
+                        continue
+                    
+                    feature = pkg.Provider._SelectedFeature
+                    provider = pkg.Provider.Name
 
                     provider_info = self.db().lookup(provider)
-                    if provider_info[KEY_STAT] is DB.COMMITTED or DB.RESOLVED:
-                        version = pkg[KEY_DT_PROV][KEY_VERS]
+                    if provider_info is not None and provider_info.Status is DB.COMMITTED or DB.RESOLVED:
+                        version = pkg.Provider.Version
                         str = self._settings_resolve_mapping(settings_root, version, feature)
 
                         p = os.path.join(settings_root, str)
 
                         if os.path.exists(p):
                             #clone settings directory
-                            tmp_settings = self._interpolate_vshome(pkg_root,
+                            tmp_settings = self._interpolate_vshome(info.Name,
+                                                                    pkg_root,
                                                                     feature,
-                                                                    p)
+                                                                    p, action)
 
                             #FIXME: use info hook
-                            cfg_path = os.path.join(provider_info[KEY_INSR], provider_info[KEY_INSN])
+                            cfg_path = os.path.join(provider_info.InstallRoot, 
+                                                    provider_info.InstallName)
 
                             try:
-                                self._cfg_cartridges_hook(cfg_path, name, tmp_settings, 'configure')
+                                self._cfg_cartridges_hook(cfg_path, info.Name, tmp_settings, 'configure')
                             finally:
                                 # remove temporary directory
                                 self._rm_rf(tmp_settings)
 
                 elif action is Package.__ACTION_REMOVE:
-                    if pkg[KEY_DT_PROV]:
-                        provider = pkg[KEY_DT_PROV][KEY_NAME]
+                    if pkg.Provider:
+                        provider = pkg.Provider.Name
                         provider_info = self.db().lookup(provider, None)
                         
-                        cfg_path = os.path.join(provider_info[KEY_INSR], provider_info[KEY_INSN])
-                        self._cfg_cartridges_hook(cfg_path, name, None, 'deconfigure')
+                        cfg_path = os.path.join(provider_info.InstallRoot, provider_info.InstallName)
+                        self._cfg_cartridges_hook(cfg_path, info.Name, None, 'deconfigure')
 
     def resolve_package_chain(self, info, package):        
+        '''
+        make sure every package in the chain is resolved
+        if not configure the package to resolve it
+        @param info:
+        @param package:
+        '''
         # If not resolved, try to resolve package
         # (i.e. configure it) Lookup complete dependency chain,
         # and check for each package if it is resolved
@@ -1295,27 +1041,27 @@ class Package (object):
         chain.append(info)
         
         for pkginfo in chain:
-            if pkginfo[KEY_STAT] is DB.RESOLVED:
+            if pkginfo.Status == DB.RESOLVED:
                 continue
-            elif pkginfo[KEY_STAT] is DB.COMMITTED:
+            elif pkginfo.Status == DB.COMMITTED:
                 # check if pkginfo dependencies are met
                 ci_r, ci_e = self.db().check_install(pkginfo)
                 if not ci_r:
                     raise PackageError(("Package %s can not be "
                                         "configured due to "
                                         "missing dependencies: %s"
-                                        % (pkginfo[KEY_NAME], ci_e)))
+                                        % (pkginfo.Name, ci_e)))
 
                 # recalculate dependency table                
                 self.db().calculate_dependency_table()
 
                 try:
-                    pkg_path = os.path.join(pkginfo[KEY_INSR],
-                                            pkginfo[KEY_INSN])
+                    pkg_path = os.path.join(pkginfo.InstallRoot,
+                                            pkginfo.InstallName)
                     self._configure_cartridges(pkginfo, pkg_path)
                 except Exception, cc_e:
                     raise PackageError(("Package %s can not be configured: %s"
-                                        % (pkginfo[KEY_NAME], cc_e)))
+                                        % (pkginfo.Name, cc_e)))
             else:
                 # If package dependency can not be resolved, error
                 raise PackageError("Broken package in dependency chain")
@@ -1541,11 +1287,11 @@ class Package (object):
         prer_h = self.__pdb.find_package_file(name, PRE_REMOVE_NAME)
         pstr_h = self.__pdb.find_package_file(name, POST_REMOVE_NAME)
                 
-        root = info[KEY_INSR] or self.env.install_root
-        if info[KEY_INSR] == '':
+        root = info.InstallRoot or self.env.install_root
+        if info.InstallRoot == '':
             root = self.env.install_root
         
-        vs_root = os.path.join(root, info[KEY_INSN])
+        vs_root = os.path.join(root, info.InstallName)
 
         hooks = None
 
@@ -1555,7 +1301,7 @@ class Package (object):
         hooks = self._deconfigure_cartridges(info, vs_root)
 
         # 4. pre-remove hook
-        rem_h_env = self._set_default_hook_env(vs_root)
+        rem_h_env = self._set_default_hook_env(vs_root, info.InstallName)
 
         self._run_hook(prer_h, rem_h_env)
 
@@ -1599,17 +1345,19 @@ class Package (object):
             try:
                 info = self.db().lookup(name)
                 
-                status = info.get(KEY_STAT, DB.UNKNOWN)
-                virtual = info.get(KEY_DT_VIRT, False)
+                status = info.Status
+                virtual = info.Virtual
                 
                 if status in DB.REMOVABLE and not virtual:
-                    try:
-                        r, v, er = self.stop(name)
-                    except Exception, e:
-                        self.env.log.exception(e)
-                        print ("Package '%s' can not be stopped, can't remove: %s" % (name, er))
-                        if self.env.debug:
-                            raise
+                    # Only stop running packages
+                    if info.Running:
+                        try:
+                            r, v, er = self.stop(name)
+                        except Exception, e:
+                            self.env.log.exception(e)
+                            print ("Package '%s' can not be stopped, can't remove: %s" % (name, er))
+                            if self.env.debug:
+                                raise
 
                     # FIXME: package state should indicate if pkg is running   
                     #if er is not None:
@@ -1649,6 +1397,77 @@ class Package (object):
 
         return res, None, err
 
+    def _copy_package_file(self, file, name, type):
+        shutil.copy2(file, os.path.join(self.env.lib_package_dir,
+                                        name + '.' + type))
+       
+    def _write_package_file(self, name, type, data):
+        write_file(os.path.join(self.env.lib_package_dir, name + '.' + type),
+                   data)
+         
+    def _commit_install(self, info):
+        root = info.InstallRoot or self.env.install_root
+
+        pkg_install_path = os.path.join(root, info.QuotedName)
+
+        wavm_pth = os.path.join(pkg_install_path, META_DIR_NAME)
+        hook_pth = os.path.join(wavm_pth, HOOK_DIR_NAME)
+
+        for f in ((wavm_pth, CHECKSUM_FILE_NAME),
+                  (wavm_pth, CONTROL_FILE_NAME),
+                  (hook_pth, PRE_INSTALL_NAME),
+                  (hook_pth, POST_INSTALL_NAME),
+                  (hook_pth, CONFIGURE_NAME),
+                  (hook_pth, DECONFIGURE_NAME),
+                  (hook_pth, PRE_REMOVE_NAME),
+                  (hook_pth, POST_REMOVE_NAME),
+                  (hook_pth, START_NAME),
+                  (hook_pth, STOP_NAME)):
+            p = os.path.join(f[0], f[1])
+
+            if os.path.exists(p):
+                self._copy_package_file(p, info.QuotedName, f[1])
+
+        bfile = os.path.join(wavm_pth, BUILD_FILE_NAME)
+        if os.path.exists(bfile):
+            self._copy_package_file(bfile, info.QuotedName, BUILD_FILE_NAME)
+        else:
+            self._write_default_build_file(
+                                    os.path.join(
+                                        self.env.lib_package_dir, 
+                                        info.QuotedName + '.' + BUILD_FILE_NAME)
+                                    )
+
+        self._write_package_file(info.QuotedName,
+                                LOCATION_FILE_NAME,
+                                ("%s: %s\n%s: %s\n" %
+                                 (KEY_INSR, info.InstallRoot,
+                                  KEY_INSN, info.InstallName)))
+        
+        self.db().commit_install(info)
+    
+    def _commit_remove(self, info):
+        self.db().commit_remove(info)
+        
+        for ext in (CHECKSUM_FILE_NAME,
+                    CONTROL_FILE_NAME,
+                    BUILD_FILE_NAME,
+                    LOCATION_FILE_NAME,
+                    PRE_INSTALL_NAME,
+                    POST_INSTALL_NAME,
+                    PRE_REMOVE_NAME,
+                    POST_REMOVE_NAME,
+                    CONFIGURE_NAME,
+                    DECONFIGURE_NAME,
+                    START_NAME,
+                    STOP_NAME):
+            p = os.path.join(self.env.lib_package_dir,
+                             info.QuotedName + '.' + ext)
+
+            if os.path.exists(p):
+                os.remove(p)
+
+        #FIXME: just wipe for now--don't record REMOVED/PURGED status. Do we need this?
     # ------------------------------------------------------------------------
     #
     # API
@@ -1751,14 +1570,14 @@ class Package (object):
 
                 info = self._load_info_from_tree(pkg_temp_path)
 
-                dst_rn = os.path.join(dest_dir, info[KEY_INSN])
+                dst_rn = os.path.join(dest_dir, info.InstallName)
 
                 if not os.path.exists(dst_rn):
                     os.mkdir(dst_rn)
                 elif os.path.exists(dst_rn):
                     self._rm_rf(dst_rn)
 
-                Package._tree_copy(info[KEY_INSN], pkg_temp_path, dst_rn, True)
+                Package._tree_copy(info.InstallName, pkg_temp_path, dst_rn, True)
 
                 self._rm_rf(pkg_temp_path)
 
@@ -1812,6 +1631,8 @@ class Package (object):
         res = True
         val = None
         err = None
+        
+        info = None
 
         if deploy_mode == None:
             deploy_mode = DEPLOY_MODE_MANUAL
@@ -1851,21 +1672,20 @@ class Package (object):
                 else:
                     info = self._load_info_from_tree(package)
 
-                info[KEY_STAT] = DB.VERIFIED
+                info.setStatus(DB.VERIFIED)
                 #verified
 
                 ok, err = self.db().check_install(info)
 
                 if ok is False:
-                    #FIXME: find better condition
-                    if info[KEY_TYPE] == VAL_TYPE_CRT:
+                    if info.Type == VAL_TYPE_CRT:
                         raise PackageError("Cartridge dependencies are missing")
                     else:
                         for er in err:
-                            if er[KEY_DEPS] is not None:
+                            if er[DB_KEY_DEPS] is not None:
                                 configure = False
     
-                            if er[KEY_CONF] is not None:
+                            if er[DB_KEY_CONF] is not None:
                                 configure = False
                                 brk = True
     
@@ -1873,7 +1693,7 @@ class Package (object):
 
                 #query package status
                 if not in_tree:
-                    status = self.db().status(info[KEY_INSN])
+                    status = self.db().status(info.InstallName)
                     
                     if status in DB.REMOVABLE:
                         #FIXME: begin transaction, save old package state
@@ -1881,18 +1701,18 @@ class Package (object):
                         # set pkg set to committed for all packages depending 
                         # on this package. They get reconfigured upon start()
                         dep_pkg = self.db().find_depending_packages(
-                                                                info[KEY_INSN])
+                                                                info.InstallName)
 
                         for d_p in dep_pkg:
                             d_p_info = self.db().lookup(d_p)
                             self.db().set_package_state(d_p_info, DB.COMMITTED)
 
-                        oinfo = self._load_info_from_db(info[KEY_INSN])
-                        virtual = oinfo.get(KEY_DT_VIRT, False)
+                        oinfo = self.db().lookup(info.InstallName)
+                        virtual = oinfo.Virtual
                         
                         hooks = None
                         if not virtual:
-                            hooks = self._remove(oinfo[KEY_INSN], oinfo, deploy_mode)
+                            hooks = self._remove(oinfo.InstallName, oinfo, deploy_mode)
                             
                         if hooks:
                             # FIXME right now we only return RESTART but
@@ -1909,16 +1729,16 @@ class Package (object):
                 #unpacked
 
                 if dest_root is None:
-                    if info[KEY_TYPE] == VAL_TYPE_CRT:
+                    if info.Type == VAL_TYPE_CRT:
                         dest_root = self.env.cartridge_dir
-                    elif info[KEY_TYPE] == VAL_TYPE_PKG:
+                    elif info.Type == VAL_TYPE_PKG:
                         dest_root = self.env.package_dir
-                    elif info[KEY_TYPE] == VAL_TYPE_APP:
+                    elif info.Type == VAL_TYPE_APP:
                         dest_root = self.env.application_dir
 
-                info[KEY_INSR] = dest_root
+                info.InstallRoot = dest_root
 
-                dst_root = os.path.join(dest_root, info[KEY_INSN])
+                dst_root = os.path.join(dest_root, info.InstallName)
 
                 if not in_tree and not os.path.exists(dst_root):
                     os.mkdir(dst_root)
@@ -1927,13 +1747,13 @@ class Package (object):
                 prei_h = os.path.join(src_dir, META_DIR_NAME, 
                                       HOOK_DIR_NAME, PRE_INSTALL_NAME)
 
-                prei_h_env = self._set_default_hook_env(dst_root)
+                prei_h_env = self._set_default_hook_env(dst_root, info.InstallName)
 
                 # FIXME: preinstall hook
                 self._run_hook(prei_h, prei_h_env)
 
                 if not in_tree:
-                    self._install_tree_files(info[KEY_INSN], src_dir, dst_root)
+                    self._install_tree_files(info.InstallName, src_dir, dst_root)
 
                 self._set_shared_locations(dst_root)
 
@@ -1941,31 +1761,29 @@ class Package (object):
                 hook_root = os.path.join(dst_root, META_DIR_NAME, HOOK_DIR_NAME)
                 psti_h = os.path.join(hook_root, POST_INSTALL_NAME)
 
-                psti_h_env = self._set_default_hook_env(dst_root)
+                psti_h_env = self._set_default_hook_env(dst_root, info.InstallName)
 
                 self._run_hook([psti_h], psti_h_env)
                 # file install complete   
 
-                self.db().commit_install(info)
+                self._commit_install(info)
 
                 if brk:
                     self.db().set_package_state(info, DB.BROKEN)
 
                 #FIXME: end transaction, package install succeeded 
-                #imported->committed
-                
-                #self.resolve_package_chain(info, info[KEY_NAME])                
+                #imported->committed               
 
                 if configure:
                     try:
                         self._configure_cartridges(info, dst_root)
 
                         if deploy_mode != DEPLOY_MODE_MANUAL:
-                            self.start(info[KEY_NAME])
+                            self.start(info.Name)
                     except Exception, e:
                         self.env.log.exception(e)
 
-                val = info[KEY_INSN]
+                val = info.InstallName
             finally:
                 if not in_tree and is_archive and src_dir:
                     self._rm_rf(src_dir)
@@ -1981,7 +1799,7 @@ class Package (object):
             self.env.log.exception(e)
             if self.env.debug:
                 raise
-
+        
         return res, val, err
 
 
@@ -2094,7 +1912,7 @@ class Package (object):
 
         return res, val, err
 
-    def info(self, name):
+    def info(self, name, retval = None):
         '''
         Get package information.
 
@@ -2115,7 +1933,15 @@ class Package (object):
                 status = self.db().status(name)
 
                 if status in DB.KNOWN:
-                    val = self._load_info_from_db(name)
+                    v = self.db().lookup(name)
+                    
+                    if retval is None:
+                        #dict
+                        val = v.toDict()
+                    elif retval == 1:
+                        val = v
+                    else:
+                        val = v.toString()
 #            finally:
 #                pass
 #                #self.__pdb.unlock()
@@ -2131,9 +1957,9 @@ class Package (object):
         available = {'local':[]}
 
         if len(roles) == 0:
-            available['local'] = self.db().filter_packages(KEY_ROLE)
+            available['local'] = self.db().filter_packages('Role')
         else:
-            available['local'] = self.db().filter_packages(KEY_ROLE, roles)
+            available['local'] = self.db().filter_packages('Role', roles)
 
         # TODO: repository feature
         #if len(repositories) != 0:
@@ -2157,7 +1983,7 @@ class Package (object):
             try:
                 info = self.db().lookup(package)
 
-                if info is None or not info[KEY_TYPE] is VAL_TYPE_APP:
+                if info is None and info.Type != VAL_TYPE_APP:
                     raise PackageError("Cartridges can not be started directly")
 
                 #if info[KEY_STAT] is DB.COMMITTED:
@@ -2165,7 +1991,7 @@ class Package (object):
                     
                 # package state is now resolved. Both calls would first look
                 # whether the package has a start or stop hook.
-                pkg_root = os.path.join(info[KEY_INSR], info[KEY_INSN])
+                pkg_root = os.path.join(info.InstallRoot, info.InstallName)
 
                 start_hook = os.path.join(pkg_root,
                                           META_DIR_NAME,
@@ -2177,17 +2003,18 @@ class Package (object):
                 # TODO: Replace this with proper handling of supplying
                 # the runtime, www-dynamic and www-static as arguments
                 # to app or delegated start hooks.
-                if info[KEY_DEPS] is not None:
-                    for dep in info[KEY_DEPS]:
+                if info.Depends is not None:
+                    for dep in info.Depends:
                         # FIXME: THIS WON'T WORK FOR OR'ED DEPENDENCIES
-                        dep_name=dep[0]['Name']
+                        dep_name=dep[0].Name
                         dep_info=self.db().lookup(dep_name)
-                        if dep_info[KEY_ROLE] == VAL_ROLE_DYN:
+                        
+                        if dep_info.Role == VAL_ROLE_DYN:
                             start_h_args.append(dep_name)
                             break
 
                 if not os.path.isfile(start_hook):
-                    delegate = info.get(KEY_DLGT, None) #info[KEY_DLGT] or None
+                    delegate = info.Delegate
 
                     if delegate is not None:
                         # Lookup delegate and check for start hook
@@ -2195,8 +2022,8 @@ class Package (object):
 
                         if not delegate_pkg is None:
                             delegate_start_hook = \
-                                os.path.join(delegate_pkg[KEY_INSR],
-                                             delegate_pkg[KEY_INSN],
+                                os.path.join(delegate_pkg.InstallRoot,
+                                             delegate_pkg.InstallName,
                                              META_DIR_NAME,
                                              HOOK_DIR_NAME,
                                              START_NAME)
@@ -2206,24 +2033,25 @@ class Package (object):
 
                                 start_h_env = \
                                     self._set_default_hook_env(\
-                                    os.path.join(delegate_pkg[KEY_INSR],
-                                                 delegate_pkg[KEY_INSN]))
+                                    os.path.join(delegate_pkg.InstallRoot,
+                                                 delegate_pkg.InstallName),
+                                                 info.InstallName)
 
                                 delegate = None
                             else:
                                 raise PackageError(("Package %s can not "
                                                     "start. Delegate %s is "
                                                     "not startable"
-                                                    % (info[KEY_NAME],
-                                                       delegate_pkg[KEY_NAME])))
+                                                    % (info.Name,
+                                                       delegate_pkg.Name)))
                     else:
                         raise PackageError(
                                 ("Package %s can not start. "
                                  "Startable delegate is missing"
-                                 % info[KEY_NAME]))
+                                 % info.Name))
                 else:
                     #call start hook
-                    start_h_env = self._set_default_hook_env(pkg_root)
+                    start_h_env = self._set_default_hook_env(pkg_root, info.Name)
 
                 # FIXME: hardcoded start hook parameters
                 start_h_args.insert(0, start_hook)
@@ -2231,9 +2059,15 @@ class Package (object):
                 if app_env is not None:
                     start_h_env.update(app_env)
 
+                start_h_env.update({'LD_PRELOAD':  \
+                                         '/opt/vostok/lib/libvesper.so'})
+
                 # capture stdout and stderr, return in err
                 o, e, val = self._run_hook(start_h_args, start_h_env)
                 err = [o, e]
+                
+                info.setRunning()
+                self.db().setExecutionState(info)
             finally:
                 self.db().unlock()
         except Exception, e:
@@ -2267,17 +2101,17 @@ class Package (object):
 
             list = []
 
-            if o_info[KEY_TYPE] is not VAL_TYPE_APP:
+            if o_info.Type is not VAL_TYPE_APP:
                 # find anything that depends on this
-                dt = self.db().get_dependency_table_info(o_info[KEY_NAME])                
+                dt = self.db().get_dependency_table_info(o_info.Name)                
 
                 if dt is not None:
                     for l in dt:
-                        prov = l[KEY_DT_PROV]
+                        prov = l.Provider
 
-                        prov_info = self.db().lookup(prov[KEY_NAME])
+                        prov_info = self.db().lookup(prov.Name)
 
-                        if prov_info[KEY_TYPE] is VAL_TYPE_APP:
+                        if prov_info.Type is VAL_TYPE_APP:
                             #add app to list
                             list.append(prov_info)
                 
@@ -2287,37 +2121,38 @@ class Package (object):
 
             # iterate over list of apps
             for info in list:
-                pkg_root = os.path.join(info[KEY_INSR], info[KEY_INSN])
+                pkg_root = os.path.join(info.InstallRoot, info.InstallName)
 
                 stop_hook = os.path.join(pkg_root,
                                          META_DIR_NAME,
                                          HOOK_DIR_NAME,
                                          STOP_NAME)
                 
-                stop_h_args=[ info[KEY_NAME] ]
+                stop_h_args=[ info.Name ]
 
                 # TODO: Replace this with proper handling of supplying
                 # the runtime, www-dynamic and www-static as arguments
                 # to app or delegated start hooks.
-                if not info[KEY_DEPS] is None:
-                    for dep in info[KEY_DEPS]:
+                if not info.Depends is None:
+                    for dep in info.Depends:
                         # FIXME: THIS WON'T WORK FOR OR'ED DEPENDENCIES
-                        dep_name=dep[0][KEY_NAME]
+                        dep_name=dep[0].Name
                         dep_info=self.db().lookup(dep_name)
-                        if dep_info[KEY_ROLE] == VAL_ROLE_DYN:
+                        
+                        if dep_info.Role == VAL_ROLE_DYN:
                             stop_h_args.append(dep_name)
                             break
 
                 if not os.path.isfile(stop_hook):
-                    delegate = info.get(KEY_DLGT, None)
+                    delegate = info.Delegate
 
                     if delegate is not None:
                         # Lookup delegate and check for stop hook
                         delegate_pkg = self.db().lookup(delegate)
 
                         delegate_stop_hook = \
-                            os.path.join(delegate_pkg[KEY_INSR],
-                                         delegate_pkg[KEY_INSN],
+                            os.path.join(delegate_pkg.InstallRoot,
+                                         delegate_pkg.InstallName,
                                          META_DIR_NAME,
                                          HOOK_DIR_NAME,
                                          STOP_NAME)
@@ -2327,22 +2162,23 @@ class Package (object):
 
                             stop_h_env = \
                                 self._set_default_hook_env(\
-                                os.path.join(delegate_pkg[KEY_INSR],
-                                             delegate_pkg[KEY_INSN]))
+                                os.path.join(delegate_pkg.InstallRoot,
+                                             delegate_pkg.InstallName),
+                                             info.Name)
                         else:
                             raise PackageError("Package %s can not stop. "
                                                "Delegate %s is not stopable"
-                                               % (info[KEY_NAME],
-                                                  delegate_pkg[KEY_NAME]))
+                                               % (info.Name,
+                                                  delegate_pkg.Name))
                     else:
                         raise PackageError(
                                 ("Can not stop Package %s. "
                                  "Stoppable delegate is missing"
-                                 % info[KEY_NAME]))
+                                 % info.Name))
 
                 else:
                     #call stop hook
-                    stop_h_env = self._set_default_hook_env(pkg_root)
+                    stop_h_env = self._set_default_hook_env(pkg_root, info.Name)
 
                 # FIXME: hardcoded start hook parameters
                 stop_h_args.insert(0, stop_hook)
@@ -2353,6 +2189,9 @@ class Package (object):
                 # capture stdout and stderr, return in err
                 o, e, val = self._run_hook(stop_h_args, stop_h_env)
                 err = [o, e]
+                
+                info.setStopped()
+                self.db().setExecutionState(info)
         except Exception, e:
             res = False
             err = e
@@ -2382,10 +2221,11 @@ class Package (object):
 
         if isinstance(path, basestring):
             try:
-                cinfo = self._load_control_info_from_tree(path)
+                info = self._load_control_info_from_tree(path)
+                #info = self._load_info_from_tree(path)
 
-                self._process_control_info(cinfo, path)
-                val = cinfo
+                #self._process_control_info(cinfo, path)
+                val = info
             except Exception, e:
                 res = False
                 err = e
@@ -2412,7 +2252,9 @@ class Package (object):
             try:
                 binfo = self._load_build_info_from_tree(path)
 
-                self._process_build_info(binfo, path)
+                info = ControlInfo(None, None)
+                
+                info._process_build_info(binfo, path)
                 val = binfo
             except Exception, e:
                 res = False
@@ -2437,42 +2279,20 @@ class Package (object):
         val = None
         err = None
 
-        if isinstance(cinfo, dict) and isinstance(path, basestring):
+        if isinstance(cinfo, ControlInfo) and isinstance(path, basestring):
             try:
                 # '<none>' (for lack of a better name) means "in memory"
-                self._validate_fields(cinfo,
-                                      CKEYS_REQ + BKEYS_REQ,
-                                      CKEYS_OPT + CKEYS_QUO,
-                                      '<none>')
-                data = ""
-                format = "%s: %s\n"
-
-                # Keys in CKEYS_REQ and CKEYS_OPT are already in canonical order
-                for k in CKEYS_REQ:
-                    data += format % (k, cinfo[k])
-
-                for k in CKEYS_OPT:
-                    if k in cinfo:
-                        if k is KEY_PROV:
-                            s = self._provides2str(cinfo[k], cinfo[KEY_NQUO])
-                        elif k is KEY_DEPS or k is KEY_CONF:
-                            if cinfo[k] is None:
-                                s = ''
-                            else:
-                                s = self._relation2str(cinfo[k])
-                        else:
-                            s = cinfo[k]
-
-                        data += format % (k, s)
+                data = cinfo.toString()
 
                 write_file(path, data)
                 
                 #add inactive entry to dependency table
-                if cinfo[KEY_DEPS]:                    
+                if cinfo.Depends:
+                    cinfo.Virtual = True                    
                     # enable virtual mode
-                    self.db()._dt_register_deps(cinfo, True)
+                    self.db()._dt_register_deps(cinfo)
                     
-                self.db()._db_entry(cinfo[KEY_NAME], cinfo, True)                    
+                self.db()._db_entry(cinfo.Name, cinfo)                    
                     
             except Exception, e:
                 res = False
@@ -2499,16 +2319,19 @@ class Package (object):
 
         if isinstance(binfo, dict) and isinstance(path, basestring):
             try:
-                # '<none>' (for lack of a better name) means "in memory"
-                self._validate_fields(binfo, BKEYS_REQ, BKEYS_OPT, '<none>')
+                info = ControlInfo(None, None)
+                
+                # validates the fields
+                binfo = info._process_build_info(binfo, path)
+                
                 data = ""
                 format = "%s: %s\n"
 
                 # Keys in BKEYS_REQ and BKEYS_OPT are already in canonical order
-                for k in BKEYS_REQ:
+                for k in info.BKEYS_REQ:
                     data += format % (k, binfo[k])
 
-                for k in BKEYS_OPT:
+                for k in info.BKEYS_OPT:
                     if k in binfo:
                         data += format % (k, binfo[k])
 
@@ -2525,10 +2348,15 @@ class Package (object):
 
         return res, val, err
 
-    # scaffolding directory is
-    # <package>/info/defaults/<quoted-package-name>. The IDL path is
-    # <package>info/defaults/idl.py.
     def get_scaffolding(self, provider = None, dependency = None, dependant = None):
+        '''
+        scaffolding directory is
+        <package>/info/defaults/<quoted-package-name>. The IDL path is
+        <package>info/defaults/idl.py.
+        @param provider:
+        @param dependency:
+        @param dependant:
+        '''
         res = True
         val = None
         err = None
@@ -2542,12 +2370,12 @@ class Package (object):
                     
                     for dep in dependency:
                         # search provider for p
-                        tmp = self.db().find_feature_packages(dep[KEY_NAME], dependant)
+                        tmp = self.db().find_feature_packages(dep.Name, dependant)
                         
                         if prov is None:
-                            prov = tmp[KEY_NAME]
+                            prov = tmp.Name
                         else:
-                            if tmp[KEY_NAME] == prov:
+                            if tmp.Name == prov:
                                 # Or relation found
                                 break
                             else:
@@ -2559,16 +2387,16 @@ class Package (object):
                     raise PackageError("Dependency and dependant must be set")
                                    
             ###known                                      
-            provider_info = self.db().lookup(provider)                    
+            provider_info = self.db().lookup(provider)
             
             if provider_info is not None:                                    
-                defaults_dir = os.path.join(provider_info[KEY_INSR],
-                                            provider_info[KEY_NQUO],
+                defaults_dir = os.path.join(provider_info.InstallRoot,
+                                            provider_info.QuotedName,
                                             META_DIR_NAME,
                                             DEFAULTS_DIR_NAME)
                 
                 scaffolding_dir = os.path.join(defaults_dir,
-                                               provider_info[KEY_NQUO])
+                                               provider_info.QuotedName)
                 
                 scaffolding_path = None
                 if os.path.exists(scaffolding_dir):
@@ -2591,10 +2419,15 @@ class Package (object):
         
         return res, val, err
     
-    # setup directory is <package>/info/setup/<name> where <name> is either
-    # a literal dependency or a name associated with a dependency based on
-    # the mapping file
     def get_setup_directory(self, package_name, dependency, shared):
+        '''
+        setup directory is <package>/info/setup/<name> where <name> is either
+        a literal dependency or a name associated with a dependency based on
+        the mapping file
+        @param package_name:
+        @param dependency:
+        @param shared:
+        '''
         res = True
         val = []
         err = None
@@ -2613,30 +2446,31 @@ class Package (object):
             setup_path = None
             
             if shared is True:
-                if pkg[KEY_TYPE] == VAL_TYPE_APP:
-                    insr = pkg.get(KEY_INSR, None)
+                if pkg.Type == VAL_TYPE_APP:
+                    insr = pkg.InstallRoot
                     if insr is None:                    
                         insr = self.env.application_dir
                         
                     setup_path = os.path.join(insr,
-                                              pkg[KEY_NQUO],
-                                              SHARED_COPY_LINK_NAME,
+                                              pkg.QuotedName,
+                                              #SHARED_COPY_LINK_NAME,
+                                              pkg.QuotedName,
                                               META_DIR_NAME,
                                               SETTINGS_DIR_NAME)
                 else:
                     raise PackageError("'shared' only applies to applications")
             else:
-                insr = pkg.get(KEY_INSR, None)
-                if insr is None:                    
-                    if pkg[KEY_TYPE] == VAL_TYPE_CRT:
+                insr = pkg.InstallRoot                
+                if insr is None:
+                    if pkg.Type == VAL_TYPE_CRT:
                         insr = self.env.cartridge_dir
-                    elif pkg[KEY_TYPE] == VAL_TYPE_PKG:
+                    elif pkg.Type == VAL_TYPE_PKG:
                         insr = self.env.package_dir
-                    elif pkg[KEY_TYPE] == VAL_TYPE_APP:
+                    elif pkg.Type == VAL_TYPE_APP:
                         insr = self.env.application_dir
                         
                 setup_path = os.path.join(insr,
-                                          pkg[KEY_NQUO],
+                                          pkg.QuotedName,
                                           META_DIR_NAME,
                                           SETTINGS_DIR_NAME)
                 
@@ -2644,7 +2478,7 @@ class Package (object):
                 # parse mapping
                 dep_path = self._settings_resolve_mapping(setup_path,
                                                           None,
-                                                          dep_info[KEY_INSN])
+                                                          dep_info.InstallName)
                 
                 path = os.path.join(setup_path, dep_path)
                 if os.path.exists(path):
@@ -2697,14 +2531,12 @@ class Package (object):
     # *****************************************************************
     # FIXME these will be accessible through a "vostok" command
     # *****************************************************************
-
-    # FIXME: are these still called?
     def get_cartridge_install_dir(self, cartridge_name):
-        res, info, err = self.info(cartridge_name)
+        res, info, err = self.info(cartridge_name,1)
 
         if res:
-            cartridge_install_dir = os.path.join(info[KEY_INSR],
-                                                 info[KEY_INSN])
+            cartridge_install_dir = os.path.join(info.InstallRoot,
+                                                 info.InstallName)
             return cartridge_install_dir
         else:
             raise Exception, err
@@ -2746,8 +2578,8 @@ class Package (object):
                 pkg = self.db().lookup(package)
 
                 if pkg is not None:
-                    h = os.path.join(pkg[KEY_INSR],
-                                     pkg[KEY_INSN],
+                    h = os.path.join(pkg.InstallRoot,
+                                     pkg.InstallName,
                                      META_DIR_NAME,
                                      HOOK_DIR_NAME,
                                      hook)                    
@@ -2786,8 +2618,8 @@ class Package (object):
                 pkg = self.db().lookup(package)
 
                 if pkg is not None:
-                    h = os.path.join(pkg[KEY_INSR],
-                                     pkg[KEY_INSN],
+                    h = os.path.join(pkg.InstallRoot,
+                                     pkg.InstallName,
                                      BUNDLE_DIR_NAME)
 
                     if os.path.exists(h):

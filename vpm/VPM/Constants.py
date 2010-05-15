@@ -15,8 +15,8 @@
 # ===========================================================================
 #
 # $URL: svn+ssh://svn.oss-1701.com/vostok/trunk/vpm/VPM/Constants.py $
-# $Date: 2010-04-10 00:29:29 +0200 (Sa, 10 Apr 2010) $
-# $Revision: 6599 $
+# $Date: 2010-05-15 21:40:49 +0200 (Sa, 15 Mai 2010) $
+# $Revision: 7394 $
 
 import os
 
@@ -52,6 +52,7 @@ START_NAME          = 'start'
 STOP_NAME           = 'stop'
 # RESTART_NAME       = 'restart'        # FIXME used?
 RELOAD_NAME         = 'reload'
+HOOK_ADJ_PRIORITY   = 2
 
 # Scaffolding
 DEFAULTS_DIR_NAME   = 'defaults'
@@ -67,154 +68,44 @@ CFG_DIR_NAME       = 'configuration'
 CFG_BASENAME       = 'configure'
 CFG_FILE_NAME      = os.path.join(CFG_DIR_NAME, CFG_BASENAME + '.py')
 
-# Dependency Table Keys
-KEY_DT_FT           = 'feature'
-KEY_DT_PROV         = 'provider'
-KEY_DT_PROV_SF      = 'sel-feature' # selected feature
-KEY_DT_VIRT         = 'virtual'
+# Build
+KEY_BUIL = 'Build'
+VAL_BUIL_DEFAULT = '1'
 
-#
-# Control & Build File Fields
-# ---------------------------
+KEY_INSR = 'Install-Root'
+KEY_INSN = 'Install-Name'
 
-# Core information
-KEY_NAME           = 'Name'             # this is the only required field
+# PackageDatabase Constants
+DB_KEY_NAME = 'Name'
+DB_KEY_VERS = 'Version'
+DB_KEY_BUIL = 'Build'
+DB_KEY_STAT = 'Status'
+DB_KEY_DEPS = 'Depends'
+DB_KEY_CONF = 'Conflicts'
+DB_KEY_ROLE = 'Role'
 
-KEY_VERS           = 'Version'
-VAL_VERS_DEFAULT   = '0.0.0'
-
-KEY_BUIL           = 'Build'
-VAL_BUIL_DEFAULT   = '1'                # start build numbers at '1'
-BUILD_FORMAT       = "%s: %s\n"         # FIXME encapsulate in write_build_file
-
-KEY_ARCH           = 'Architecture'
-VAL_ARCH_DEFAULT   = 'all'              # assume non-binary format
-VALS_ARCH          = frozenset(['i686', 'amd64', 'all'])
-
-# Provides, Depends, Conflicts are used for dependency declarations
-KEY_PROV           = 'Provides'
-VAL_PROV_DEFAULT   = ''
-                   
-KEY_DEPS           = 'Depends'
-VAL_DEPS_DEFAULT   = ''
-                   
-KEY_CONF           = 'Conflicts'
-VAL_CONF_DEFAULT   = ''
-
-# Additional informational fields
-KEY_DESC           = 'Description'      # text
-VAL_DESC_DEFAULT   = ''
-
-KEY_VEND           = 'Vendor'           # e.g. IBM vs Sun JRE
-VAL_VEND_DEFAULT   = ''
-
-KEY_TITL           = 'DisplayName'      # if that needs to be different
-VAL_TITL_DEFAULT   = ''
-
-KEY_DLGT           = 'Delegate'
-VAL_DLGT_DEFAULT   = ''                 # Empty by default. 
-                                        # Must be set explicitly
-
-KEY_BNDL           = 'Bundles'          # List of bundles, used at build time.
-VAL_BNDL_DEFAULT   = ''
-
-
-# Type is used internally (vpm's are treated differently based on type)
-KEY_TYPE           = 'Type'
-VAL_TYPE_CRT       = 'Cartridge'
-VAL_TYPE_PKG       = 'Package'
-VAL_TYPE_APP       = 'Application'
-VAL_TYPE_DEFAULT   = VAL_TYPE_APP       # optional for applications
-VALS_TYPE          = frozenset([VAL_TYPE_CRT, VAL_TYPE_PKG, VAL_TYPE_APP])
-                   
+# Package States
+PSTATE_VIRGIN     = 'Virgin'
+PSTATE_SNAP       = 'Snapshot'
+    
+# Type Constants
+VAL_TYPE_CRT      = 'Cartridge'
+VAL_TYPE_PKG      = 'Package'
+VAL_TYPE_APP      = 'Application'
+    
+# Role Constants
 # Roles are used for application "stack" selection in the UI
-KEY_ROLE           = 'Role'
-VAL_ROLE_STA       = 'www-static'
-VAL_ROLE_STA_E     = 'www-static:extension'
-VAL_ROLE_DYN       = 'www-dynamic'
-VAL_ROLE_DYN_E     = 'www-dynamic:extension'
-VAL_ROLE_RTM       = 'runtime'
-VAL_ROLE_RTM_E     = 'runtime:extension'
-VAL_ROLE_APP       = 'application'
-VAL_ROLE_DBM       = 'database'
-VAL_ROLE_DBM_E     = 'database:extension'
-VAL_ROLE_DEFAULT   = VAL_ROLE_APP       # optional for applications
-VALS_ROLE          = frozenset([VAL_ROLE_STA, VAL_ROLE_STA_E, VAL_ROLE_DYN, 
-                                VAL_ROLE_DYN_E, VAL_ROLE_RTM, VAL_ROLE_RTM_E, 
-                                VAL_ROLE_APP, VAL_ROLE_DBM, VAL_ROLE_DBM_E])
-
-#KEY_TAG = 'Tags'
-#VAL_TAG = ''
-#VAL_TAG_RUN = 'runnable'
-#VAL_TAG_END = 'endpoint'
-#VAL_TAG_DEFAULT = frozenset([])
-  
-# Parsed Control File Keys
-KEY_NQUO      = 'Quoted-Name'
-KEY_VQUO      = 'Quoted-Version'
-KEY_PRED      = 'Predicate'
-KEY_STR       = 'String'
-KEY_STAT      = 'Status'
-
-VAL_STAT_DEFAULT = 'imported' # hack
-
-KEY_INSR          = 'Install-Root'
-VAL_INSR_DEFAULT  = ''
-
-KEY_INSN          = 'Install-Name'
-VAL_INSN_DEFAULT  = ''
-
-KEY_INSR          = 'Install-Root'
-VAL_INSR_DEFAULT  = ''
-
-KEY_INSN          = 'Install-Name'
-VAL_INSN_DEFAULT  = ''
-
-KEY_PSTATE    = 'Package-State'
-PSTATE_VIRGIN = 'Virgin'
-PSTATE_SNAP   = 'Snapshot'
-VAL_PSTATE_DEFAULT = PSTATE_VIRGIN
-
-# We keep these as ordered lists representing canonical ordering on write-out
-CKEYS_REQ = [KEY_NAME]
-CKEYS_OPT = [KEY_VERS, KEY_ARCH,              # core information
-             KEY_PROV, KEY_DEPS, KEY_CONF,    # dependencies
-             KEY_DESC, KEY_VEND, KEY_TITL,    # addt'l information
-             KEY_DLGT,                        # delegate pkg control
-             KEY_TYPE, KEY_ROLE,              # classification
-             KEY_BNDL,
-             KEY_INSR, KEY_INSN,
-             KEY_STAT, KEY_PSTATE]             # Fields required for scaffolding
-
-CKEYS_QUO = [KEY_NQUO, KEY_VQUO]
-
-BKEYS_REQ = [KEY_BUIL]
-BKEYS_OPT = []
-BKEYS_QUO = []
-
-LKEYS_REQ = [KEY_INSR, KEY_INSN]
-LKEYS_OPT = []
-LKEYS_QUO = []
-
-CINFO_DEFAULT = {KEY_VERS : VAL_VERS_DEFAULT,
-                 KEY_BUIL : VAL_BUIL_DEFAULT,
-                 KEY_ARCH : VAL_ARCH_DEFAULT,
-                 KEY_PROV : VAL_PROV_DEFAULT,
-                 KEY_DEPS : VAL_DEPS_DEFAULT,
-                 KEY_CONF : VAL_CONF_DEFAULT,
-                 KEY_DESC : VAL_DESC_DEFAULT,
-                 KEY_VEND : VAL_VEND_DEFAULT,
-                 KEY_TITL : VAL_TITL_DEFAULT,
-                 KEY_DLGT : VAL_DLGT_DEFAULT,
-                 KEY_TYPE : VAL_TYPE_DEFAULT,
-                 KEY_ROLE : VAL_ROLE_DEFAULT,
-                 KEY_BNDL : VAL_BNDL_DEFAULT,
-                 KEY_INSR : VAL_INSR_DEFAULT,
-                 KEY_INSN : VAL_INSN_DEFAULT,
-                 KEY_STAT : VAL_STAT_DEFAULT,
-                 KEY_PSTATE: VAL_PSTATE_DEFAULT
-                 }
-
+VAL_ROLE_STA      = 'www-static'
+VAL_ROLE_STA_E    = 'www-static:extension'
+VAL_ROLE_DYN      = 'www-dynamic'
+VAL_ROLE_DYN_E    = 'www-dynamic:extension'
+VAL_ROLE_RTM      = 'runtime'
+VAL_ROLE_RTM_E    = 'runtime:extension'
+VAL_ROLE_APP      = 'application'
+VAL_ROLE_DBM      = 'database'
+VAL_ROLE_DBM_E    = 'database:extension'
+               
+##
 VPM_VERSION            = '2.0'
 VPM_VERSIONS_SUPPORTED = frozenset([VPM_VERSION])
 VPM_PKG_EXTENSION      = 'vpm'

@@ -16,8 +16,8 @@
 # ===========================================================================
 #
 # $URL: svn+ssh://svn.oss-1701.com/vostok/trunk/vpm/bin/vostok $
-# $Date: 2010-03-31 02:42:32 +0200 (Mi, 31 Mrz 2010) $
-# $Revision: 6415 $
+# $Date: 2010-05-08 00:38:30 +0200 (Sa, 08 Mai 2010) $
+# $Revision: 7263 $
 
 from optparse import OptionParser
 
@@ -155,6 +155,7 @@ if Args:
                 sys.stderr.write(e)
             if r and v:
                 os.putenv('VS_HOME', v)
+                os.putenv('LD_PRELOAD', '/opt/vostok/lib/libvesper.so')
                 rc = call(cmd)
             else:
                 rc = 1
@@ -220,7 +221,7 @@ if Args:
         #   x = max(total - 100 - 200 - 250, 640)
         #
         if res and val:
-            role = val[KEY_ROLE]
+            role = val[DB_KEY_ROLE]
 
             if   role == VAL_ROLE_STA:
                 alloc = 256000

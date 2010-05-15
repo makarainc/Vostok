@@ -16,8 +16,8 @@
 # ===========================================================================
 #
 # $URL: svn+ssh://svn.oss-1701.com/vostok/trunk/vpm/bin/vpm $
-# $Date: 2010-03-31 02:42:32 +0200 (Mi, 31 Mrz 2010) $
-# $Revision: 6415 $
+# $Date: 2010-04-20 21:12:07 +0200 (Di, 20 Apr 2010) $
+# $Revision: 6820 $
 
 from optparse import OptionParser
 
@@ -182,7 +182,7 @@ if args:
     elif cmd == 'info':
         pkg = VPM.Package(env)
         pkg_name, = ensure_args(1)
-        res, val, err = pkg.info(pkg_name)
+        res, val, err = pkg.info(pkg_name,2)
     elif cmd == 'status':
         db = VPM.DB(env)
         pkg_name = ensure_args(1)
@@ -217,12 +217,12 @@ if args:
                 "| Name                             Version          Build",
                 "=-================================-================-====="]
         for pkg in lis:
-            status = pkg[VPM.KEY_STAT]
+            status = pkg[VPM.DB_KEY_STAT]
             strs.append("%s %-32s %-16s %5s" % \
-                        (stati[pkg[VPM.KEY_STAT]],
-                         pkg[VPM.KEY_NAME],
-                         pkg[VPM.KEY_VERS],
-                         pkg[VPM.KEY_BUIL]))
+                        (stati[pkg[VPM.DB_KEY_STAT]],
+                         pkg[VPM.DB_KEY_NAME],
+                         pkg[VPM.DB_KEY_VERS],
+                         pkg[VPM.DB_KEY_BUIL]))
         val = "\n".join(strs)
     elif cmd == 'list-avail':
         pkg = VPM.Package(env)
@@ -246,10 +246,10 @@ if args:
         for k, v in list.iteritems():
             for p in v:
                 strs.append("%s %-30s %-11s %5s" % \
-                        (p[VPM.KEY_ROLE],
-                         p[VPM.KEY_NAME],
-                         p[VPM.KEY_VERS],
-                         p[VPM.KEY_BUIL]))
+                        (p[VPM.DB_KEY_ROLE],
+                         p[VPM.DB_KEY_NAME],
+                         p[VPM.DB_KEY_VERS],
+                         p[VPM.DB_KEY_BUIL]))
         val = "\n".join(strs)    
     elif cmd == 'chirp':
         # art stolen from http://www.ascii-art.de/ascii/ab/bird.txt

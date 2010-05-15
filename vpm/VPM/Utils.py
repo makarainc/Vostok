@@ -15,11 +15,12 @@
 # ===========================================================================
 #
 # $URL: svn+ssh://svn.oss-1701.com/vostok/trunk/vpm/VPM/Utils.py $
-# $Date: 2010-03-31 02:42:32 +0200 (Mi, 31 Mrz 2010) $
-# $Revision: 6415 $
+# $Date: 2010-04-17 12:57:37 +0200 (Sa, 17 Apr 2010) $
+# $Revision: 6745 $
 
 import os
 import os.path
+import cPickle
 
 def read_file(pathname, error = False):
     data = None
@@ -48,6 +49,23 @@ def write_file(pathname, data):
     finally:
         fd.close()
 
-
+def serialize(pathname, data):
+    fd = open(pathname, 'w')
+    
+    try:
+        cPickle.dump(data, fd, 2) # use protocol 2
+    finally:
+        fd.close()
+        
+def unserialize(pathname):
+    fd = open(pathname, 'rb')
+    data = None
+    
+    try:
+        data = cPickle.load(fd)
+    finally:
+        fd.close()
+        
+    return data
 #
 # EOF

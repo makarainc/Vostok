@@ -15,14 +15,17 @@
 # ===========================================================================
 #
 # $URL: svn+ssh://svn.oss-1701.com/vostok/trunk/vpm/VPM/__init__.py $
-# $Date: 2010-03-31 02:42:32 +0200 (Mi, 31 Mrz 2010) $
-# $Revision: 6415 $
+# $Date: 2010-04-19 18:15:45 +0200 (Mo, 19 Apr 2010) $
+# $Revision: 6747 $
 
 from VPM.Constants import *
-from VPM.Utils import read_file, write_file
+from VPM.ControlInfo import ControlInfo
+from VPM.DB import *
 from VPM.Environment import Environment
-from VPM.DB import DB, DBError
-from VPM.Package import Package, ControlFileError, PackageError, HookError
+from VPM.Exceptions import *
+from VPM.Package import Package, PackageError, HookError
+from VPM.Structures import *
+from VPM.Utils import read_file, write_file
 
 #
 # EOF
