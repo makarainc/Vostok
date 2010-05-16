@@ -15,8 +15,8 @@
 # ===========================================================================
 #
 # $URL: svn+ssh://svn.oss-1701.com/vostok/trunk/vpm/VPM/Constants.py $
-# $Date: 2010-05-15 21:40:49 +0200 (Sa, 15 Mai 2010) $
-# $Revision: 7394 $
+# $Date: 2010-05-16 13:49:52 +0200 (So, 16 Mai 2010) $
+# $Revision: 7399 $
 
 import os
 
@@ -38,6 +38,9 @@ SIGNATURE_FILE_NAME = 'signature'
 VERSION_FILE_NAME   = 'version'
 
 ZIP_EXCLUDE = ['.svn', 'CVS', VPM_LOCK_FILE_NAME]
+
+DEFAULT_USER        = 'root' # existing system user
+DEFAULT_GROUP       = 'root' # existing system group
 
 # VPM Hooks
 HOOK_DIR_NAME       = 'hooks'

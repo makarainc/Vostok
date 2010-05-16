@@ -15,8 +15,8 @@
 # ===========================================================================
 #
 # $URL: svn+ssh://svn.oss-1701.com/vostok/trunk/vpm/VPM/Package.py $
-# $Date: 2010-05-15 21:40:49 +0200 (Sa, 15 Mai 2010) $
-# $Revision: 7394 $
+# $Date: 2010-05-16 13:49:52 +0200 (So, 16 Mai 2010) $
+# $Revision: 7399 $
 
 import copy
 import fcntl
@@ -34,7 +34,7 @@ import tempfile
 import urllib
 import logging
 import zipfile
-import xml.dom.minidom
+import simplejson
 from subprocess import call, Popen, PIPE
 
 from VPM.Constants import *
@@ -1153,46 +1153,37 @@ class Package (object):
     def _update_bundle_permissions(self, pkg_name, pkg_install_path):
         '''
         Set permissions for folders controlled by vpm2
-        Currently this applies only to the info/hooks folder
         @param pkg_name:
         @param pkg_install_path:
         '''
         bundle_dir = os.path.join(pkg_install_path, BUNDLE_DIR_NAME)
-        filemode_file = os.path.join(bundle_dir, FILEMODE_FILE_NAME)
+        
+        
+        filemode_file = os.path.join(pkg_install_path, META_DIR_NAME, FILEMODE_FILE_NAME)
 
         if os.path.exists(filemode_file):
             filemode_fc = read_file(filemode_file, False)
 
             #parse filemode file
-            # <filemodes>
-            #     <file path="/foo/bar" mode="755" owner="root" encoding="utf-8" />
-            #     <directory path="/baz/bag" mode="755" owner="root" recursive="true" />
-            # </filemodes>
+            #[
+            #    {
+            #       "path" : "foo/bar",          // either a file or directory
+            #       "pattern" : "foo/.*\.pyx$",  // alternative: use extended regexp
+            #       "mode" : "0664",             // optional (default: "0755"/"0644")
+            #       "owner" : "DEFAULT",     // optional (default: "DEFAULT")
+            #       "group" : "DEFAULT",     // optional (default: "DEFAULT")
+            #       "encoding" : "utf-8",     // optional (default: "utf-8")
+            #       "recursive" : true,          // optional (default: false, no effect on files)
+            #       "follow-symlinks" : true     // optional (default: false, no effect unless "recursive")
+            #    },
+            #    ...
+            #]
+            # pattern and follow-symlinks currently unsupported
             try:
-                f = []
-                filemodes = xml.dom.minidom.parse(filemode_fc)
-
-                for entry in filemodes.firstChild.childNodes:
-                    if entry.nodeName == 'file':
-                        path = entry.getAttribute("path").strip()
-                        mode = entry.getAttribute("mode").strip()
-                        owner = entry.getAttribute("owner").strip()
-                        #enc = entry.getAttribute("encoding").strip()
-
-                        fe = {'path':path, 'mode':mode, 'owner':owner}
-                    elif entry.nodeName == 'directory':
-                        path = entry.getAttribute("path").strip()
-                        mode = entry.getAttribute("mode").strip()
-                        owner = entry.getAttribute("owner").strip()
-
-                        if entry.getAttribute("recursive").strip().lower() == 'true':
-                            rec = True
-
-                        fe = {'path':path, 'mode':mode, 'owner':owner, 'recursive':rec}
-                    else:
-                        continue
-
-                    f.append(fe)
+                filemodes = simplejson.loads(filemode_fc)
+                
+                if filemodes is None:
+                    return
 
                 #
                 owd = os.getcwd()
@@ -1201,29 +1192,31 @@ class Package (object):
                 os.chroot(bundle_dir) # set root to bundle
 
                 #apply file modes
-                for fe in f:
+                for fe in filemodes:
                     #set mode for each hook script
                     path = fe.get('path')
                     mode = fe.get('mode').zfill(4)
 
-                    owner_group = fe.get('owner').strip()
+                    owner = fe.get('owner',DEFAULT_USER)
+                    group = fe.get('group',DEFAULT_GROUP)
 
-                    if fe.get('recursive'):
+                    if fe.get('recursive',False):
                         cmd = ['chmod', '-R', mode, path]
                         call(cmd)
 
-                        cmd = ['chown', '-R', owner_group, path]
+                        cmd = ['chown', '-R', owner+':'+group, path]
                         call(cmd)
                     else:
-                        os.chmod(path, mode)
+                        cmd = ['chmod', mode, path]
+                        call(cmd)
+                        
+                        cmd = ['chown', owner+':'+group, path]
+                        call(cmd)
 
-                        owner, group = -1
-                        owner, group = owner_group.split(':')
-                        os.chown(path, owner, group)
-
-                os.chroot('/') #change root back
+                os.chroot(owd) #change root back
                 os.chdir(owd)
-            except:
+            except Exception, e:
+                print e
                 raise PackageError("Could not apply file modes")
 
     def _install_tree_files(self, pkg_name, src_root, dst_root):
